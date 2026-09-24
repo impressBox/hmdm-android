@@ -102,6 +102,9 @@ public class SystemUtils {
             }
         } else if (BuildConfig.DEVICE_ID_CHOICE.equals("mac") || "mac".equals(deviceIdUse)) {
             deviceId = DeviceInfoProvider.getMacAddress(context);
+        } else if (BuildConfig.DEVICE_ID_CHOICE.equals("serial_upper") || "serial_upper".equals(deviceIdUse)) {
+            // impressBox: upper-case hardware serial, or ANDROID_ID when there is no serial
+            deviceId = com.hmdm.launcher.impressbox.DeviceSetup.getDefaultDeviceId(context);
         }
 
         if (deviceId == null || deviceId.length() == 0) {

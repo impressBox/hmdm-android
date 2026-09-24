@@ -1,0 +1,277 @@
+/*
+ * Copyright (C) 2026 impressBox
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.hmdm.launcher.impressbox;
+
+import android.Manifest;
+import android.app.admin.DevicePolicyManager;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.os.UserManager;
+import android.provider.Settings;
+import android.text.TextUtils;
+import android.util.Log;
+
+import com.hmdm.launcher.BuildConfig;
+import com.hmdm.launcher.Const;
+import com.hmdm.launcher.helper.SettingsHelper;
+import com.hmdm.launcher.pro.service.CheckForegroundAppAccessibilityService;
+import com.hmdm.launcher.util.LegacyUtils;
+import com.hmdm.launcher.util.RemoteLogger;
+import com.hmdm.launcher.util.Utils;
+
+import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.Locale;
+import java.util.Set;
+
+/**
+ * Device preparation for impressBox signage panels, done by the launcher itself as device owner.
+ *
+ * This replaces most of the adb commands the impressBox Writer used to run after
+ * "dpm set-device-owner". The Writer now only installs the APK, sets the device owner,
+ * grants a few special permissions, and starts the launcher with provisioning extras:
+ *
+ *   am start -n com.hmdm.launcher/.ui.MainActivity \
+ *       --es com.hmdm.DEVICE_ID <id> --ez com.impressbox.LOCK_ROTATION true
+ *
+ * Everything here is idempotent and is re-applied on each start and each configuration update,
+ * so a setting changed on the device (or by the server) is put back.
+ */
+public class DeviceSetup {
+
+    // Intent extras accepted by MainActivity (see consumeProvisioningExtras)
+    public static final String EXTRA_DEVICE_ID = Const.QR_DEVICE_ID_ATTR;           // "com.hmdm.DEVICE_ID"
+    public static final String EXTRA_LOCK_ROTATION = "com.impressbox.LOCK_ROTATION";
+
+    // Launcher app setting (server: Applications > launcher settings): extra packages to hide, comma separated
+    private static final String APP_SETTING_HIDE_PACKAGES = "hide_packages";
+
+    // Vendor players / launchers which compete with our launcher or the impress player
+    private static final String[] DEFAULT_HIDDEN_PACKAGES = {
+            "com.xbh.universal.player",
+            "com.google.android.tvlauncher"
+    };
+
+    private static final String IMMERSIVE_POLICY = "immersive.full=com.impressplayer";
+    // BatteryManager.BATTERY_PLUGGED_AC | BATTERY_PLUGGED_USB, as the Writer used
+    private static final String STAY_ON_PLUGGED = "3";
+
+    private static final String PREFS = "impressbox_setup";
+    private static final String PREF_LOCK_ROTATION = "lock_rotation";
+
+    private DeviceSetup() {}
+
+    /**
+     * Reads the provisioning extras the Writer passes with "am start".
+     * The device ID is only accepted while none is set, so an enrolled device keeps its identity.
+     */
+    public static void consumeProvisioningExtras(Context context, Intent intent) {
+        if (intent == null || intent.getExtras() == null) {
+            return;
+        }
+        SettingsHelper settingsHelper = SettingsHelper.getInstance(context.getApplicationContext());
+        String deviceId = intent.getStringExtra(EXTRA_DEVICE_ID);
+        if (!TextUtils.isEmpty(deviceId) && TextUtils.isEmpty(settingsHelper.getDeviceId())) {
+            settingsHelper.setDeviceId(deviceId.trim());
+            Log.i(Const.LOG_TAG, "Provisioning: device ID set from launch intent: " + deviceId);
+        }
+        if (intent.hasExtra(EXTRA_LOCK_ROTATION)) {
+            prefs(context).edit()
+                    .putBoolean(PREF_LOCK_ROTATION, intent.getBooleanExtra(EXTRA_LOCK_ROTATION, false))
+                    .apply();
+        }
+    }
+
+    /**
+     * Device ID used when nothing else provides one: hardware serial, or ANDROID_ID if the serial
+     * is not available; upper case (same rule as the Writer).
+     */
+    public static String getDefaultDeviceId(Context context) {
+        String serial = null;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                serial = Build.getSerial();
+            }
+        } catch (SecurityException e) {
+            // Not device owner yet
+        }
+        if (TextUtils.isEmpty(serial) || Build.UNKNOWN.equals(serial)) {
+            serial = readSystemProperty("ro.serialno");
+        }
+        if (!TextUtils.isEmpty(serial) && !Build.UNKNOWN.equals(serial)) {
+            return serial.toUpperCase(Locale.ROOT);
+        }
+        String androidId = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID);
+        return TextUtils.isEmpty(androidId) ? null : androidId.toUpperCase(Locale.ROOT);
+    }
+
+    /** Applies all device settings. Safe to call often; does nothing unless we are the device owner. */
+    public static void apply(Context context) {
+        if (!Utils.isDeviceOwner(context)) {
+            return;
+        }
+        if (BuildConfig.FORCE_SCREEN_ALWAYS_ON) {
+            enforceScreenAlwaysOn(context);
+        }
+        hideVendorPackages(context);
+        applyImmersiveMode(context);
+        applyRotationLock(context);
+        enableAccessibilityService(context);
+    }
+
+    /**
+     * The screen must never turn off on signage devices, whatever the server configuration says.
+     * The user cannot change the timeout either.
+     */
+    public static void enforceScreenAlwaysOn(Context context) {
+        DevicePolicyManager dpm = dpm(context);
+        ComponentName admin = LegacyUtils.getAdminComponentName(context);
+        if (dpm == null || !Utils.isDeviceOwner(context)) {
+            return;
+        }
+        try {
+            dpm.addUserRestriction(admin, UserManager.DISALLOW_CONFIG_SCREEN_TIMEOUT);
+        } catch (Exception e) {
+            Log.w(Const.LOG_TAG, "Setup: cannot lock the screen timeout setting: " + e.getMessage());
+        }
+        String never = Integer.toString(Integer.MAX_VALUE);
+        boolean done = false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                dpm.setSystemSetting(admin, Settings.System.SCREEN_OFF_TIMEOUT, never);
+                done = true;
+            } catch (Exception e) {
+                Log.w(Const.LOG_TAG, "Setup: setSystemSetting(screen_off_timeout) failed: " + e.getMessage());
+            }
+        }
+        if (!done && Settings.System.canWrite(context)) {
+            try {
+                Settings.System.putInt(context.getContentResolver(), Settings.System.SCREEN_OFF_TIMEOUT, Integer.MAX_VALUE);
+            } catch (Exception e) {
+                Log.w(Const.LOG_TAG, "Setup: cannot write screen_off_timeout: " + e.getMessage());
+            }
+        }
+        try {
+            dpm.setGlobalSetting(admin, Settings.Global.STAY_ON_WHILE_PLUGGED_IN, STAY_ON_PLUGGED);
+        } catch (Exception e) {
+            Log.w(Const.LOG_TAG, "Setup: cannot set stay_on_while_plugged_in: " + e.getMessage());
+        }
+        try {
+            // No maximum time to lock
+            dpm.setMaximumTimeToLock(admin, 0);
+        } catch (Exception e) {
+            // Ignore
+        }
+    }
+
+    private static void hideVendorPackages(Context context) {
+        DevicePolicyManager dpm = dpm(context);
+        ComponentName admin = LegacyUtils.getAdminComponentName(context);
+        Set<String> packages = new LinkedHashSet<>(Arrays.asList(DEFAULT_HIDDEN_PACKAGES));
+        String extra = SettingsHelper.getInstance(context).getAppPreference(context.getPackageName(), APP_SETTING_HIDE_PACKAGES);
+        if (extra != null) {
+            for (String p : extra.split(",")) {
+                if (!p.trim().isEmpty()) {
+                    packages.add(p.trim());
+                }
+            }
+        }
+        for (String pkg : packages) {
+            if (pkg.equals(context.getPackageName()) || !Utils.isPackageInstalled(context, pkg)) {
+                continue;
+            }
+            try {
+                if (!dpm.isApplicationHidden(admin, pkg)) {
+                    dpm.setApplicationHidden(admin, pkg, true);
+                    RemoteLogger.log(context, Const.LOG_INFO, "Setup: hidden " + pkg);
+                }
+            } catch (Exception e) {
+                Log.w(Const.LOG_TAG, "Setup: cannot hide " + pkg + ": " + e.getMessage());
+            }
+        }
+    }
+
+    // Requires WRITE_SECURE_SETTINGS, granted once by the Writer ("pm grant")
+    private static void applyImmersiveMode(Context context) {
+        if (!hasWriteSecureSettings(context)) {
+            return;
+        }
+        try {
+            Settings.Global.putString(context.getContentResolver(), "policy_control", IMMERSIVE_POLICY);
+            Settings.Secure.putString(context.getContentResolver(), "immersive_mode_confirmations", "confirmed");
+        } catch (Exception e) {
+            Log.w(Const.LOG_TAG, "Setup: cannot apply immersive mode: " + e.getMessage());
+        }
+    }
+
+    // Requires "Modify system settings" (WRITE_SETTINGS app op), granted once by the Writer
+    private static void applyRotationLock(Context context) {
+        if (!prefs(context).getBoolean(PREF_LOCK_ROTATION, false) || !Settings.System.canWrite(context)) {
+            return;
+        }
+        try {
+            Settings.System.putInt(context.getContentResolver(), Settings.System.ACCELEROMETER_ROTATION, 0);
+            Settings.System.putInt(context.getContentResolver(), Settings.System.USER_ROTATION, 0);
+        } catch (Exception e) {
+            Log.w(Const.LOG_TAG, "Setup: cannot lock rotation: " + e.getMessage());
+        }
+    }
+
+    // Turns our app-control accessibility service on without user interaction (WRITE_SECURE_SETTINGS)
+    private static void enableAccessibilityService(Context context) {
+        if (!BuildConfig.USE_ACCESSIBILITY || !hasWriteSecureSettings(context)) {
+            return;
+        }
+        try {
+            String ours = new ComponentName(context, CheckForegroundAppAccessibilityService.class).flattenToString();
+            String enabled = Settings.Secure.getString(context.getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (enabled == null || !Arrays.asList(enabled.split(":")).contains(ours)) {
+                String value = TextUtils.isEmpty(enabled) ? ours : enabled + ":" + ours;
+                Settings.Secure.putString(context.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, value);
+            }
+            Settings.Secure.putInt(context.getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED, 1);
+        } catch (Exception e) {
+            Log.w(Const.LOG_TAG, "Setup: cannot enable the accessibility service: " + e.getMessage());
+        }
+    }
+
+    private static boolean hasWriteSecureSettings(Context context) {
+        return context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private static String readSystemProperty(String key) {
+        try {
+            Class<?> c = Class.forName("android.os.SystemProperties");
+            return (String) c.getMethod("get", String.class).invoke(null, key);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static SharedPreferences prefs(Context context) {
+        return context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    private static DevicePolicyManager dpm(Context context) {
+        return (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
+    }
+}
