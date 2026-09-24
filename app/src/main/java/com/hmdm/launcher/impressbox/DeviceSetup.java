@@ -17,6 +17,8 @@
 package com.hmdm.launcher.impressbox;
 
 import android.Manifest;
+import android.app.Activity;
+import android.app.KeyguardManager;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.Context;
@@ -28,6 +30,7 @@ import android.os.UserManager;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Log;
+import android.view.WindowManager;
 
 import com.hmdm.launcher.BuildConfig;
 import com.hmdm.launcher.Const;
@@ -47,7 +50,9 @@ import java.util.Set;
  *
  * This replaces most of the adb commands the impressBox Writer used to run after
  * "dpm set-device-owner". The Writer now only installs the APK, sets the device owner,
- * grants a few special permissions, and starts the launcher with provisioning extras:
+ * grants the three app ops Android does not let a device owner grant to itself
+ * (overlay, usage access, modify system settings) plus vendor shell-only keys in one call,
+ * and starts the launcher with provisioning extras:
  *
  *   am start -n com.hmdm.launcher/.ui.MainActivity \
  *       --es com.hmdm.DEVICE_ID <id> --ez com.impressbox.LOCK_ROTATION true
@@ -123,6 +128,25 @@ public class DeviceSetup {
         return TextUtils.isEmpty(androidId) ? null : androidId.toUpperCase(Locale.ROOT);
     }
 
+    /** Turns the screen on and shows the launcher over the lock screen. */
+    public static void wakeUp(Activity activity) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                activity.setTurnScreenOn(true);
+                activity.setShowWhenLocked(true);
+            } else {
+                activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                        | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED);
+            }
+            KeyguardManager km = (KeyguardManager) activity.getSystemService(Context.KEYGUARD_SERVICE);
+            if (km != null && km.isKeyguardLocked() && !km.isKeyguardSecure()) {
+                km.requestDismissKeyguard(activity, null);
+            }
+        } catch (Exception e) {
+            Log.w(Const.LOG_TAG, "Setup: cannot wake up the screen: " + e.getMessage());
+        }
+    }
+
     /** Applies all device settings. Safe to call often; does nothing unless we are the device owner. */
     public static void apply(Context context) {
         if (!Utils.isDeviceOwner(context)) {
@@ -132,6 +156,7 @@ public class DeviceSetup {
             enforceScreenAlwaysOn(context);
         }
         hideVendorPackages(context);
+        disableLockScreen(context);
         applyImmersiveMode(context);
         applyRotationLock(context);
         enableAccessibilityService(context);
@@ -182,6 +207,16 @@ public class DeviceSetup {
         }
     }
 
+    // Signage panels have no user to unlock them: disable the (insecure) lock screen.
+    // Has no effect when a PIN / password is set.
+    private static void disableLockScreen(Context context) {
+        try {
+            dpm(context).setKeyguardDisabled(LegacyUtils.getAdminComponentName(context), true);
+        } catch (Exception e) {
+            Log.w(Const.LOG_TAG, "Setup: cannot disable the lock screen: " + e.getMessage());
+        }
+    }
+
     private static void hideVendorPackages(Context context) {
         DevicePolicyManager dpm = dpm(context);
         ComponentName admin = LegacyUtils.getAdminComponentName(context);
@@ -209,7 +244,8 @@ public class DeviceSetup {
         }
     }
 
-    // Requires WRITE_SECURE_SETTINGS, granted once by the Writer ("pm grant")
+    // Only when WRITE_SECURE_SETTINGS was granted ("pm grant"); the Writer does not grant it and sets
+    // these two keys itself (policy_control only exists up to Android 10 anyway)
     private static void applyImmersiveMode(Context context) {
         if (!hasWriteSecureSettings(context)) {
             return;

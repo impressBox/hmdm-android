@@ -57,9 +57,14 @@ public class App extends Application {
     private static class ProvisioningHook implements ActivityLifecycleCallbacks {
         @Override
         public void onActivityCreated(@NonNull Activity activity, @Nullable Bundle savedInstanceState) {
-            if (activity instanceof MainActivity && savedInstanceState == null) {
-                DeviceSetup.consumeProvisioningExtras(activity, activity.getIntent());
-                DeviceSetup.apply(activity);
+            if (activity instanceof MainActivity) {
+                // Signage: the launcher wakes the screen itself and is never hidden behind the lock screen,
+                // so nobody has to press a key (the Writer no longer sends KEYCODE_WAKEUP)
+                DeviceSetup.wakeUp(activity);
+                if (savedInstanceState == null) {
+                    DeviceSetup.consumeProvisioningExtras(activity, activity.getIntent());
+                    DeviceSetup.apply(activity);
+                }
             }
         }
         @Override public void onActivityStarted(@NonNull Activity activity) {}
