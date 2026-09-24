@@ -241,7 +241,7 @@
         </provider>
 
         <service android:name=".pro.service.CheckForegroundApplicationService"
-            android:exported="true"/>
+            android:exported="false"/>
 
         <service android:name=".service.PluginApiService" android:enabled="true" android:exported="true">
             <intent-filter>
@@ -249,9 +249,17 @@
             </intent-filter>
         </service>
 
-        <!-- Stub -->
         <service android:name=".pro.service.CheckForegroundAppAccessibilityService"
-                 android:exported="false"/>
+                 android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+                 android:label="@string/white_app_name"
+                 android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
 
         <service android:name="org.eclipse.paho.android.service.MqttService"
             android:foregroundServiceType="specialUse|systemExempted"
