@@ -1,8 +1,5 @@
 /*
- * Headwind MDM: Open Source Android MDM Software
- * https://h-mdm.com
- *
- * Copyright (C) 2019 Headwind Solutions LLC (http://h-sms.com)
+ * Copyright (C) 2026 impressBox
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,18 +16,52 @@
 
 package com.hmdm.launcher.pro.service;
 
-import android.app.Service;
+import android.accessibilityservice.AccessibilityService;
 import android.content.Intent;
-import android.os.IBinder;
+import android.util.Log;
+import android.view.accessibility.AccessibilityEvent;
+
+import com.hmdm.launcher.Const;
+import com.hmdm.launcher.pro.AppAccessPolicy;
 
 /**
- * In open-source version, the service checking foreground apps is just a stub;
- * this option is available in Pro-version only
+ * Accessibility-based watchdog: reacts immediately when a window of a forbidden app comes to front.
+ * Used when BuildConfig.USE_ACCESSIBILITY is enabled and the user has turned the service on.
+ * The system binds the service itself; starting it with startService() has no additional effect.
  */
-public class CheckForegroundAppAccessibilityService extends Service {
+public class CheckForegroundAppAccessibilityService extends AccessibilityService {
+
     @Override
-    public IBinder onBind(Intent intent) {
-        // Stub
-        return null;
+    protected void onServiceConnected() {
+        super.onServiceConnected();
+        AppAccessPolicy.register(this);
+        Log.i(Const.LOG_TAG, "Accessibility app control connected");
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        return START_NOT_STICKY;
+    }
+
+    @Override
+    public void onAccessibilityEvent(AccessibilityEvent event) {
+        if (event == null || event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            return;
+        }
+        CharSequence pkg = event.getPackageName();
+        if (pkg == null) {
+            return;
+        }
+        try {
+            if (!AppAccessPolicy.isAllowed(this, pkg.toString())) {
+                AppAccessPolicy.block(this, pkg.toString(), "accessibility");
+            }
+        } catch (Exception e) {
+            Log.w(Const.LOG_TAG, "Accessibility app control failed: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public void onInterrupt() {
     }
 }
