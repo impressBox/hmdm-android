@@ -18,6 +18,7 @@ import com.hmdm.launcher.json.Application;
 import com.hmdm.launcher.json.DeviceInfo;
 import com.hmdm.launcher.json.RemoteFile;
 import com.hmdm.launcher.json.ServerConfig;
+import com.hmdm.launcher.impressbox.DeviceSetup;
 import com.hmdm.launcher.pro.ProUtils;
 import com.hmdm.launcher.pro.service.CheckForegroundAppAccessibilityService;
 import com.hmdm.launcher.pro.service.CheckForegroundApplicationService;
@@ -288,6 +289,8 @@ public class Initializer {
         }
 
         Utils.disableScreenshots(config.isDisableScreenshots(), context);
+
+        DeviceSetup.apply(context);
     }
 
 }
