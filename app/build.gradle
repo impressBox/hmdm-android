@@ -115,6 +115,8 @@ android {
         buildConfigField("Boolean", "USE_ACCESSIBILITY", "false")
         // Never let the screen turn off; the server configuration cannot change the timeout
         buildConfigField("Boolean", "FORCE_SCREEN_ALWAYS_ON", "false")
+        // Install the CA certificates from assets, the configuration and the QR code as device owner
+        buildConfigField("Boolean", "INSTALL_CA_CERTIFICATES", "true")
     }
 
     // impressBox release signing. Keep the key out of the repository: pass the values with -P or put them
@@ -178,6 +180,8 @@ android {
             buildConfigField("Boolean", "ENABLE_KIOSK_WITHOUT_OVERLAYS", "true")
             buildConfigField("Boolean", "SET_DEFAULT_LAUNCHER_EARLY", "true")
             buildConfigField("Boolean", "FORCE_SCREEN_ALWAYS_ON", "true")
+            // Installing CA certificates breaks the network on some panels (disabled in the 6.24 build too)
+            buildConfigField("Boolean", "INSTALL_CA_CERTIFICATES", "false")
             buildConfigField("String", "REQUEST_SIGNATURE",
                     "\"" + (project.findProperty('impressboxRequestSignature') ?: 'changeme-C3z9vi54') + "\"")
             buildConfigField("String", "LIBRARY_API_KEY",

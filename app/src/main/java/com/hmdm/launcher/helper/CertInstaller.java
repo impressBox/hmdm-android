@@ -12,6 +12,7 @@ import android.util.Log;
 
 import androidx.annotation.RequiresApi;
 
+import com.hmdm.launcher.BuildConfig;
 import com.hmdm.launcher.Const;
 import com.hmdm.launcher.R;
 import com.hmdm.launcher.util.InstallUtils;
@@ -149,6 +150,13 @@ public class CertInstaller {
 
     @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
     public static boolean installCertificate(Context context, String cert, String path, boolean remoteLog) {
+        if (!BuildConfig.INSTALL_CA_CERTIFICATES) {
+            // impressBox: installing CA certificates breaks the network on some panels,
+            // so it is disabled in our build (same as in the 6.24 build we used before).
+            // Treated as success so provisioning with certificates in the QR code goes on.
+            Log.i(Const.LOG_TAG, "CA certificate installation disabled in this build, skipped: " + path);
+            return true;
+        }
         try {
             DevicePolicyManager dpm = (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
             ComponentName adminComponentName = LegacyUtils.getAdminComponentName(context);
