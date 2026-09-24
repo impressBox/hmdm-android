@@ -72,6 +72,14 @@ public class MdmChoiceSetupActivity extends AppCompatActivity {
                 deviceId = intent.getStringExtra(DevicePolicyManager.EXTRA_PROVISIONING_IMEI);
             } else if (BuildConfig.DEVICE_ID_CHOICE.equals("serial") || "serial".equals(deviceIdUse)) {
                 deviceId = intent.getStringExtra(DevicePolicyManager.EXTRA_PROVISIONING_SERIAL_NUMBER);
+            } else if (BuildConfig.DEVICE_ID_CHOICE.equals("serial_upper") || "serial_upper".equals(deviceIdUse)) {
+                // impressBox: upper-case serial number, never ask. If the serial is not passed here,
+                // the launcher sets it itself once it is the device owner.
+                deviceId = intent.getStringExtra(DevicePolicyManager.EXTRA_PROVISIONING_SERIAL_NUMBER);
+                if (deviceId == null || deviceId.isEmpty() || Build.UNKNOWN.equals(deviceId)) {
+                    return;
+                }
+                deviceId = deviceId.toUpperCase(java.util.Locale.ROOT);
             } else {
                 // MAC address is not available here, because the app isn't a device owner yet
                 displayEnterDeviceIdDialog(intent.getStringExtra(DevicePolicyManager.EXTRA_PROVISIONING_IMEI),
