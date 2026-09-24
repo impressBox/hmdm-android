@@ -70,6 +70,9 @@
         tools:ignore="ProtectedPermissions"/>
     <uses-permission android:name="android.permission.WRITE_SETTINGS"
         tools:ignore="ProtectedPermissions"/>
+    <!-- Granted once by the impressBox Writer (pm grant) so the launcher can apply immersive mode itself -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions"/>
     <uses-permission android:name="android.permission.REBOOT"
         tools:ignore="ProtectedPermissions"/>
 
