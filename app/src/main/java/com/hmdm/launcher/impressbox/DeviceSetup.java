@@ -26,6 +26,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.UserManager;
 import android.provider.Settings;
 import android.text.TextUtils;
@@ -42,7 +43,6 @@ import com.hmdm.launcher.util.Utils;
 
 import java.util.Arrays;
 import java.util.LinkedHashSet;
-import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -55,7 +55,9 @@ import java.util.Set;
  * and starts the launcher with provisioning extras:
  *
  *   am start -n com.hmdm.launcher/.ui.MainActivity \
- *       --es com.hmdm.DEVICE_ID <id> --ez com.impressbox.LOCK_ROTATION true
+ *       --ez com.impressbox.LOCK_ROTATION true
+ *
+ * The device ID is the hardware serial number, read by the launcher itself and passed on to the player.
  *
  * Everything here is idempotent and is re-applied on each start and each configuration update,
  * so a setting changed on the device (or by the server) is put back.
@@ -74,6 +76,13 @@ public class DeviceSetup {
             "com.xbh.universal.player",
             "com.google.android.tvlauncher"
     };
+
+    // DEVICE_ID_CHOICE of the impressbox flavor: hardware serial number, as Android returns it
+    public static final String CHOICE_SERIAL = "impressbox_serial";
+
+    // The impress player and the managed configuration key it reads the serial number from
+    private static final String PLAYER_PACKAGE = "com.impressplayer";
+    private static final String PLAYER_KEY_SERIAL = "serial_number";
 
     private static final String IMMERSIVE_POLICY = "immersive.full=com.impressplayer";
     // BatteryManager.BATTERY_PLUGGED_AC | BATTERY_PLUGGED_USB, as the Writer used
@@ -94,8 +103,8 @@ public class DeviceSetup {
         }
         SettingsHelper settingsHelper = SettingsHelper.getInstance(context.getApplicationContext());
         String deviceId = intent.getStringExtra(EXTRA_DEVICE_ID);
-        if (useAndroidId()) {
-            // The device ID is always the launcher's own ANDROID_ID; an ID passed by the Writer is ignored
+        if (isAutoDeviceId()) {
+            // The launcher reads the device ID itself (serial number); an ID passed by the Writer is ignored
             deviceId = null;
         }
         if (!TextUtils.isEmpty(deviceId) && TextUtils.isEmpty(settingsHelper.getDeviceId())) {
@@ -109,29 +118,25 @@ public class DeviceSetup {
         }
     }
 
-    /** True when the build uses the launcher's ANDROID_ID as the device ID (impressbox flavor). */
-    public static boolean useAndroidId() {
-        return "android_id".equals(BuildConfig.DEVICE_ID_CHOICE);
+    /** True when the build reads the device ID itself and never takes it from outside (impressbox flavor). */
+    public static boolean isAutoDeviceId() {
+        return CHOICE_SERIAL.equals(BuildConfig.DEVICE_ID_CHOICE) || "android_id".equals(BuildConfig.DEVICE_ID_CHOICE);
     }
 
     /**
-     * The launcher's ANDROID_ID in upper case. Note: since Android 8 every signing key gets its own
-     * ANDROID_ID, so this is not the value "adb shell settings get secure android_id" or other apps see.
-     * It survives app updates signed with the same key; it changes after a factory reset.
+     * The launcher's ANDROID_ID, exactly as Android returns it. Since Android 8 every signing key gets its
+     * own ANDROID_ID, so it differs from the player's unless both are signed with the same key.
      */
     public static String getAndroidId(Context context) {
         String androidId = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID);
-        return TextUtils.isEmpty(androidId) ? null : androidId.toUpperCase(Locale.ROOT);
+        return TextUtils.isEmpty(androidId) ? null : androidId;
     }
 
     /**
-     * Device ID used when nothing else provides one. With DEVICE_ID_CHOICE=android_id: the ANDROID_ID.
-     * Otherwise: hardware serial, or ANDROID_ID if the serial is not available; upper case.
+     * The hardware serial number exactly as Android returns it (Build.getSerial(), readable by the device owner),
+     * or ro.serialno. Null when not available, e.g. before the launcher is the device owner.
      */
-    public static String getDefaultDeviceId(Context context) {
-        if (useAndroidId()) {
-            return getAndroidId(context);
-        }
+    public static String getSerialNumber() {
         String serial = null;
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -143,11 +148,52 @@ public class DeviceSetup {
         if (TextUtils.isEmpty(serial) || Build.UNKNOWN.equals(serial)) {
             serial = readSystemProperty("ro.serialno");
         }
-        if (!TextUtils.isEmpty(serial) && !Build.UNKNOWN.equals(serial)) {
-            return serial.toUpperCase(Locale.ROOT);
+        return TextUtils.isEmpty(serial) || Build.UNKNOWN.equals(serial) ? null : serial.trim();
+    }
+
+    /**
+     * Device ID used when nothing else provides one. With DEVICE_ID_CHOICE=android_id: the ANDROID_ID.
+     * Otherwise: the hardware serial number as is, or the ANDROID_ID if there is no serial.
+     */
+    public static String getDefaultDeviceId(Context context) {
+        if ("android_id".equals(BuildConfig.DEVICE_ID_CHOICE)) {
+            return getAndroidId(context);
         }
-        String androidId = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID);
-        return TextUtils.isEmpty(androidId) ? null : androidId.toUpperCase(Locale.ROOT);
+        String serial = getSerialNumber();
+        return serial != null ? serial : getAndroidId(context);
+    }
+
+    /**
+     * The impress player cannot read the serial number itself (Android 10+ only lets the device owner do it),
+     * so the launcher hands it over as a managed configuration value of the player ("serial_number").
+     * The player reports it to the server instead of its ANDROID_ID, so both apps use the same ID.
+     * Merged into the player's existing restrictions (app settings from the server are kept); may be set
+     * before the player is installed. Re-applied on each start and each configuration update.
+     */
+    public static void publishSerialToPlayer(Context context) {
+        if (!Utils.isDeviceOwner(context)) {
+            return;
+        }
+        String serial = getSerialNumber();
+        if (serial == null) {
+            return;
+        }
+        try {
+            DevicePolicyManager dpm = dpm(context);
+            ComponentName admin = LegacyUtils.getAdminComponentName(context);
+            Bundle restrictions = dpm.getApplicationRestrictions(admin, PLAYER_PACKAGE);
+            if (restrictions == null) {
+                restrictions = new Bundle();
+            }
+            if (serial.equals(restrictions.getString(PLAYER_KEY_SERIAL))) {
+                return;
+            }
+            restrictions.putString(PLAYER_KEY_SERIAL, serial);
+            dpm.setApplicationRestrictions(admin, PLAYER_PACKAGE, restrictions);
+            Log.i(Const.LOG_TAG, "Setup: serial number passed to " + PLAYER_PACKAGE);
+        } catch (Exception e) {
+            Log.w(Const.LOG_TAG, "Setup: cannot pass the serial number to the player: " + e.getMessage());
+        }
     }
 
     /** Turns the screen on and shows the launcher over the lock screen. */
@@ -182,6 +228,7 @@ public class DeviceSetup {
         applyImmersiveMode(context);
         applyRotationLock(context);
         enableAccessibilityService(context);
+        publishSerialToPlayer(context);
     }
 
     /**

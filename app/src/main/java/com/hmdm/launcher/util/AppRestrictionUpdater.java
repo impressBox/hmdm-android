@@ -63,6 +63,8 @@ public class AppRestrictionUpdater {
                 e.printStackTrace();
             }
         }
+        // impressBox: the server settings above replace the player's restrictions; put the serial number back
+        com.hmdm.launcher.impressbox.DeviceSetup.publishSerialToPlayer(context);
     }
 
     private static void parseManagedConfig(Bundle bundle, String str) {
