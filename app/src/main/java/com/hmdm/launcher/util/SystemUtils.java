@@ -102,6 +102,12 @@ public class SystemUtils {
             }
         } else if (BuildConfig.DEVICE_ID_CHOICE.equals("mac") || "mac".equals(deviceIdUse)) {
             deviceId = DeviceInfoProvider.getMacAddress(context);
+        } else if (BuildConfig.DEVICE_ID_CHOICE.equals("android_id") || "android_id".equals(deviceIdUse)) {
+            // impressBox: the launcher's own ANDROID_ID
+            deviceId = com.hmdm.launcher.impressbox.DeviceSetup.getAndroidId(context);
+        } else if (BuildConfig.DEVICE_ID_CHOICE.equals("impressbox_serial") || "impressbox_serial".equals(deviceIdUse)) {
+            // impressBox: hardware serial number as is, or ANDROID_ID when there is no serial
+            deviceId = com.hmdm.launcher.impressbox.DeviceSetup.getDefaultDeviceId(context);
         }
 
         if (deviceId == null || deviceId.length() == 0) {

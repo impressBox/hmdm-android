@@ -72,6 +72,19 @@ public class MdmChoiceSetupActivity extends AppCompatActivity {
                 deviceId = intent.getStringExtra(DevicePolicyManager.EXTRA_PROVISIONING_IMEI);
             } else if (BuildConfig.DEVICE_ID_CHOICE.equals("serial") || "serial".equals(deviceIdUse)) {
                 deviceId = intent.getStringExtra(DevicePolicyManager.EXTRA_PROVISIONING_SERIAL_NUMBER);
+            } else if (BuildConfig.DEVICE_ID_CHOICE.equals("android_id") || "android_id".equals(deviceIdUse)) {
+                // impressBox: the launcher's own ANDROID_ID, never ask
+                deviceId = com.hmdm.launcher.impressbox.DeviceSetup.getAndroidId(this);
+                if (deviceId == null) {
+                    return;
+                }
+            } else if (BuildConfig.DEVICE_ID_CHOICE.equals("impressbox_serial") || "impressbox_serial".equals(deviceIdUse)) {
+                // impressBox: serial number as is, never ask. If the serial is not passed here,
+                // the launcher sets it itself once it is the device owner.
+                deviceId = intent.getStringExtra(DevicePolicyManager.EXTRA_PROVISIONING_SERIAL_NUMBER);
+                if (deviceId == null || deviceId.isEmpty() || Build.UNKNOWN.equals(deviceId)) {
+                    return;
+                }
             } else {
                 // MAC address is not available here, because the app isn't a device owner yet
                 displayEnterDeviceIdDialog(intent.getStringExtra(DevicePolicyManager.EXTRA_PROVISIONING_IMEI),

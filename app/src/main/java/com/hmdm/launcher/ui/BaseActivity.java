@@ -49,6 +49,7 @@ import com.hmdm.launcher.databinding.DialogEnterDeviceIdBinding;
 import com.hmdm.launcher.databinding.DialogEnterServerBinding;
 import com.hmdm.launcher.databinding.DialogNetworkErrorBinding;
 import com.hmdm.launcher.helper.SettingsHelper;
+import com.hmdm.launcher.impressbox.DeviceSetup;
 import com.hmdm.launcher.json.DeviceEnrollOptions;
 import com.hmdm.launcher.json.ServerConfig;
 import com.hmdm.launcher.server.ServerUrl;
@@ -88,7 +89,15 @@ public class BaseActivity extends AppCompatActivity {
         }
     }
 
+    // impressBox: never ask for the device ID on the device, it is the serial number
+    private static final long DEVICE_ID_RETRY_DELAY_MS = 30000;
+    private final Handler deviceIdRetryHandler = new Handler();
+
     protected void createAndShowEnterDeviceIdDialog( boolean error, String deviceId ) {
+        if (!BuildConfig.ASK_DEVICE_ID && this instanceof MainActivity) {
+            confirmDeviceIdWithoutAsking(error);
+            return;
+        }
         dismissDialog(enterDeviceIdDialog);
         enterDeviceIdDialog = new Dialog( this );
         enterDeviceIdDialogBinding = DataBindingUtil.inflate(
@@ -152,6 +161,43 @@ public class BaseActivity extends AppCompatActivity {
             }
         });
         enterDeviceIdDialog.show();
+    }
+
+    // Instead of the dialog: make sure the device ID is set (serial number) and (re)load the configuration.
+    // On a server error (e.g. the device is not registered in the MDM yet) the load is retried later.
+    private void confirmDeviceIdWithoutAsking(boolean error) {
+        SettingsHelper settingsHelper = SettingsHelper.getInstance(this);
+        String id = settingsHelper.getDeviceId();
+        if (id == null || id.isEmpty()) {
+            id = DeviceSetup.getDefaultDeviceId(this);
+            if (id != null) {
+                settingsHelper.setDeviceId(id);
+            }
+        }
+        if (id == null || id.isEmpty()) {
+            Log.w(Const.LOG_TAG, "Device ID is not available yet, retrying later");
+        } else {
+            Log.i(Const.LOG_TAG, "Using device ID " + id + (error ? ", server error: retrying later" : ""));
+        }
+        final String deviceId = id;
+        deviceIdRetryHandler.removeCallbacksAndMessages(null);
+        deviceIdRetryHandler.postDelayed(() -> {
+            if (isFinishing() || isDestroyed()) {
+                return;
+            }
+            if (deviceId == null || deviceId.isEmpty()) {
+                confirmDeviceIdWithoutAsking(false);
+                return;
+            }
+            // Reuse the normal "save device ID" flow of MainActivity without showing the dialog
+            enterDeviceIdDialog = new Dialog(this);
+            enterDeviceIdDialogBinding = DataBindingUtil.inflate(LayoutInflater.from(this),
+                    R.layout.dialog_enter_device_id, null, false);
+            enterDeviceIdDialogBinding.deviceId.setText(deviceId);
+            ((MainActivity) this).saveDeviceId(null);
+            // Keep it null so a later server error comes back here instead of showing the dialog
+            enterDeviceIdDialog = null;
+        }, (error || deviceId == null || deviceId.isEmpty()) ? DEVICE_ID_RETRY_DELAY_MS : 0);
     }
 
     public void showDeviceIdVariants(View view) {

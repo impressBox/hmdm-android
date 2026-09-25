@@ -55,10 +55,10 @@ android {
         multiDexEnabled true
 
         // Default URL of the web panel (scheme + host!)
-        buildConfigField("String", "BASE_URL", "\"https://app.h-mdm.com\"")
+        buildConfigField("String", "BASE_URL", "\"https://androidmdm.impressbox.eu\"")
         // URL of the secondary address of your web panel, called when the primary host is not available.
         // Could be equal to the BASE_URL parameter
-        buildConfigField("String", "SECONDARY_BASE_URL", "\"https://app.h-mdm.com\"")
+        buildConfigField("String", "SECONDARY_BASE_URL", "\"https://androidmdm.impressbox.eu\"")
         // Relative path of the web panel on the server. Keep it empty if installed in the root
         buildConfigField("String", "SERVER_PROJECT", "\"\"")
         // This parameter manages how the device ID should be set up at first start
@@ -93,7 +93,7 @@ android {
         buildConfigField("Boolean", "ANR_WATCHDOG", "false")
         // If set to true, the server URL will be requested in UI in non-MDM mode even if it is hardcoded in build.gradle
         // See the related "if" statement in MainActivity.java
-        buildConfigField("Boolean", "REQUEST_SERVER_URL", "true")
+        buildConfigField("Boolean", "REQUEST_SERVER_URL", "false")
         // Set to true to debug admin receiver via remote logging
         buildConfigField("Boolean", "DEVICE_ADMIN_DEBUG", "false")
         // Set to true to enable kiosk mode even if the app can't draw over other windows
@@ -113,7 +113,28 @@ android {
         // Use accessibility services to control unwanted apps
         // (this option is banned by Play Protect in some countries!)
         buildConfigField("Boolean", "USE_ACCESSIBILITY", "false")
+        // Never let the screen turn off; the server configuration cannot change the timeout
+        buildConfigField("Boolean", "FORCE_SCREEN_ALWAYS_ON", "false")
+        // Install the CA certificates from assets, the configuration and the QR code as device owner
+        buildConfigField("Boolean", "INSTALL_CA_CERTIFICATES", "true")
+        // Show the "enter device ID" dialog when the ID is missing or the server rejects it
+        buildConfigField("Boolean", "ASK_DEVICE_ID", "true")
     }
+
+    // impressBox release signing. Keep the key out of the repository: pass the values with -P or put them
+    // in ~/.gradle/gradle.properties. To update devices provisioned with the old APK in place, this must be
+    // the same key the old APK was signed with.
+    signingConfigs {
+        impressbox {
+            if (project.hasProperty('impressboxStoreFile')) {
+                storeFile file(project.property('impressboxStoreFile'))
+                storePassword project.property('impressboxStorePassword')
+                keyAlias project.property('impressboxKeyAlias')
+                keyPassword project.property('impressboxKeyPassword')
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
@@ -150,6 +171,30 @@ android {
 
     productFlavors {
         opensource { }
+
+        // impressBox signage build: ./gradlew assembleImpressboxRelease
+        // Secrets are read from Gradle properties (-P or ~/.gradle/gradle.properties), never committed:
+        //   impressboxRequestSignature, impressboxLibraryApiKey
+        impressbox {
+            // Higher than the 6.24 "master" build (16240) so it installs over it
+            versionCode 16390
+            // Device ID = the hardware serial number (as Android returns it); never ask on the device.
+            // The launcher passes it to the player (managed config "serial_number"), which reports the same ID
+            buildConfigField("String", "DEVICE_ID_CHOICE", "\"impressbox_serial\"")
+            buildConfigField("Boolean", "ASK_DEVICE_ID", "false")
+            buildConfigField("Boolean", "ENABLE_KIOSK_WITHOUT_OVERLAYS", "true")
+            buildConfigField("Boolean", "SET_DEFAULT_LAUNCHER_EARLY", "true")
+            buildConfigField("Boolean", "FORCE_SCREEN_ALWAYS_ON", "true")
+            // Installing CA certificates breaks the network on some panels (disabled in the 6.24 build too)
+            buildConfigField("Boolean", "INSTALL_CA_CERTIFICATES", "false")
+            buildConfigField("String", "REQUEST_SIGNATURE",
+                    "\"" + (project.findProperty('impressboxRequestSignature') ?: 'changeme-C3z9vi54') + "\"")
+            buildConfigField("String", "LIBRARY_API_KEY",
+                    "\"" + (project.findProperty('impressboxLibraryApiKey') ?: 'changeme-8gzk321W') + "\"")
+            if (project.hasProperty('impressboxStoreFile')) {
+                signingConfig signingConfigs.impressbox
+            }
+        }
     }
 }
 

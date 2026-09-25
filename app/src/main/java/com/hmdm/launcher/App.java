@@ -19,7 +19,15 @@
 
 package com.hmdm.launcher;
 
+import android.app.Activity;
 import android.app.Application;
+import android.os.Bundle;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
+import com.hmdm.launcher.impressbox.DeviceSetup;
+import com.hmdm.launcher.ui.MainActivity;
 
 import com.jakewharton.picasso.OkHttp3Downloader;
 import com.squareup.picasso.Picasso;
@@ -36,6 +44,35 @@ public class App extends Application {
         //built.setIndicatorsEnabled(true);
         //built.setLoggingEnabled(true);
         Picasso.setSingletonInstance(built);
+
+        registerActivityLifecycleCallbacks(new ProvisioningHook());
+    }
+
+    /**
+     * impressBox: picks up the provisioning extras the Writer passes with
+     * "am start -n com.hmdm.launcher/.ui.MainActivity --es com.hmdm.DEVICE_ID ... --ez com.impressbox.LOCK_ROTATION ..."
+     * and applies the device setup. onActivityCreated runs inside MainActivity's super.onCreate(),
+     * i.e. before MainActivity decides whether it needs to ask for a device ID.
+     */
+    private static class ProvisioningHook implements ActivityLifecycleCallbacks {
+        @Override
+        public void onActivityCreated(@NonNull Activity activity, @Nullable Bundle savedInstanceState) {
+            if (activity instanceof MainActivity) {
+                // Signage: the launcher wakes the screen itself and is never hidden behind the lock screen,
+                // so nobody has to press a key (the Writer no longer sends KEYCODE_WAKEUP)
+                DeviceSetup.wakeUp(activity);
+                if (savedInstanceState == null) {
+                    DeviceSetup.consumeProvisioningExtras(activity, activity.getIntent());
+                    DeviceSetup.apply(activity);
+                }
+            }
+        }
+        @Override public void onActivityStarted(@NonNull Activity activity) {}
+        @Override public void onActivityResumed(@NonNull Activity activity) {}
+        @Override public void onActivityPaused(@NonNull Activity activity) {}
+        @Override public void onActivityStopped(@NonNull Activity activity) {}
+        @Override public void onActivitySaveInstanceState(@NonNull Activity activity, @NonNull Bundle outState) {}
+        @Override public void onActivityDestroyed(@NonNull Activity activity) {}
     }
 
 }
