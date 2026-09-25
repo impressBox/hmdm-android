@@ -94,6 +94,10 @@ public class DeviceSetup {
         }
         SettingsHelper settingsHelper = SettingsHelper.getInstance(context.getApplicationContext());
         String deviceId = intent.getStringExtra(EXTRA_DEVICE_ID);
+        if (useAndroidId()) {
+            // The device ID is always the launcher's own ANDROID_ID; an ID passed by the Writer is ignored
+            deviceId = null;
+        }
         if (!TextUtils.isEmpty(deviceId) && TextUtils.isEmpty(settingsHelper.getDeviceId())) {
             settingsHelper.setDeviceId(deviceId.trim());
             Log.i(Const.LOG_TAG, "Provisioning: device ID set from launch intent: " + deviceId);
@@ -105,11 +109,29 @@ public class DeviceSetup {
         }
     }
 
+    /** True when the build uses the launcher's ANDROID_ID as the device ID (impressbox flavor). */
+    public static boolean useAndroidId() {
+        return "android_id".equals(BuildConfig.DEVICE_ID_CHOICE);
+    }
+
     /**
-     * Device ID used when nothing else provides one: hardware serial, or ANDROID_ID if the serial
-     * is not available; upper case (same rule as the Writer).
+     * The launcher's ANDROID_ID in upper case. Note: since Android 8 every signing key gets its own
+     * ANDROID_ID, so this is not the value "adb shell settings get secure android_id" or other apps see.
+     * It survives app updates signed with the same key; it changes after a factory reset.
+     */
+    public static String getAndroidId(Context context) {
+        String androidId = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID);
+        return TextUtils.isEmpty(androidId) ? null : androidId.toUpperCase(Locale.ROOT);
+    }
+
+    /**
+     * Device ID used when nothing else provides one. With DEVICE_ID_CHOICE=android_id: the ANDROID_ID.
+     * Otherwise: hardware serial, or ANDROID_ID if the serial is not available; upper case.
      */
     public static String getDefaultDeviceId(Context context) {
+        if (useAndroidId()) {
+            return getAndroidId(context);
+        }
         String serial = null;
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
