@@ -178,8 +178,8 @@ android {
         impressbox {
             // Higher than the 6.24 "master" build (16240) so it installs over it
             versionCode 16390
-            // Device ID = serial number (upper case, ANDROID_ID if there is no serial); never ask on the device
-            buildConfigField("String", "DEVICE_ID_CHOICE", "\"serial_upper\"")
+            // Device ID = the launcher's ANDROID_ID (upper case); never ask on the device
+            buildConfigField("String", "DEVICE_ID_CHOICE", "\"android_id\"")
             buildConfigField("Boolean", "ASK_DEVICE_ID", "false")
             buildConfigField("Boolean", "ENABLE_KIOSK_WITHOUT_OVERLAYS", "true")
             buildConfigField("Boolean", "SET_DEFAULT_LAUNCHER_EARLY", "true")
