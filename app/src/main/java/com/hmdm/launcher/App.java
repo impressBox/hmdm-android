@@ -26,6 +26,7 @@ import android.os.Bundle;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.hmdm.launcher.impressbox.AdbKeeper;
 import com.hmdm.launcher.impressbox.DeviceSetup;
 import com.hmdm.launcher.ui.MainActivity;
 
@@ -46,6 +47,9 @@ public class App extends Application {
         Picasso.setSingletonInstance(built);
 
         registerActivityLifecycleCallbacks(new ProvisioningHook());
+
+        // impressBox: keep USB / network ADB on (checked now and every few minutes)
+        AdbKeeper.start(this);
     }
 
     /**
