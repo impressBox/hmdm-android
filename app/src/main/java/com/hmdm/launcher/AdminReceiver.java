@@ -70,6 +70,38 @@ public class AdminReceiver extends DeviceAdminReceiver {
         updateSettings(context, bundle);
     }
 
+    /**
+     * impressBox: the Writer registers the device in the MDM before it starts the launcher
+     * and passes the number and configuration it used as `am start` string extras
+     * (com.hmdm.DEVICE_ID, com.hmdm.CONFIG, optionally com.hmdm.GROUP / com.hmdm.CUSTOMER).
+     * Applied exactly like the QR / init.json enrollment. Returns true when the intent
+     * carried a device ID and the settings were applied.
+     */
+    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
+    public static boolean updateSettingsFromIntent(Context context, Intent intent) {
+        if (intent == null || intent.getExtras() == null) {
+            return false;
+        }
+        String deviceId = intent.getStringExtra(Const.QR_DEVICE_ID_ATTR);
+        if (deviceId == null || deviceId.trim().isEmpty()) {
+            return false;
+        }
+        PersistableBundle bundle = new PersistableBundle();
+        for (String key : intent.getExtras().keySet()) {
+            if (!key.startsWith("com.hmdm.")) {
+                continue;
+            }
+            Object value = intent.getExtras().get(key);
+            if (value instanceof String) {
+                bundle.putString(key, ((String) value).trim());
+            }
+        }
+        SharedPreferences preferences = context.getApplicationContext().getSharedPreferences(Const.PREFERENCES, MODE_PRIVATE);
+        PreferenceLogger.log(preferences, "Enrollment passed by the Writer: " + deviceId);
+        updateSettings(context, bundle);
+        return true;
+    }
+
     @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
     public static void updateSettingsFromFile(Context context) {
         try {

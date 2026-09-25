@@ -26,6 +26,7 @@ import android.app.admin.DevicePolicyManager;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Handler;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -41,6 +42,7 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
+import com.hmdm.launcher.AdminReceiver;
 import com.hmdm.launcher.BuildConfig;
 import com.hmdm.launcher.Const;
 import com.hmdm.launcher.R;
@@ -64,6 +66,19 @@ import java.util.List;
 import okhttp3.HttpUrl;
 
 public class BaseActivity extends AppCompatActivity {
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        // impressBox: the Writer registers the device in the MDM first and starts the launcher
+        // with the number and configuration it used (am start extras com.hmdm.DEVICE_ID /
+        // com.hmdm.CONFIG). Apply them before MainActivity.onCreate looks at the device ID:
+        // they win over a stored ID, so a re-provisioned panel follows its new registration,
+        // and with an ID set MainActivity no longer falls back to init.json or the serial.
+        if (this instanceof MainActivity && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            AdminReceiver.updateSettingsFromIntent(this, getIntent());
+        }
+    }
 
     protected ProgressDialog progressDialog;
 
