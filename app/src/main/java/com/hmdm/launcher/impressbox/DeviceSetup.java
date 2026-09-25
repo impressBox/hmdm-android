@@ -340,9 +340,10 @@ public class DeviceSetup {
         }
     }
 
-    // Turns our app-control accessibility service on without user interaction (WRITE_SECURE_SETTINGS)
+    // Turns our accessibility service (app control and / or the kiosk exit code on the remote control)
+    // on without user interaction (WRITE_SECURE_SETTINGS)
     private static void enableAccessibilityService(Context context) {
-        if (!BuildConfig.USE_ACCESSIBILITY || !hasWriteSecureSettings(context)) {
+        if (!(BuildConfig.USE_ACCESSIBILITY || KioskExitCode.isEnabledInBuild()) || !hasWriteSecureSettings(context)) {
             return;
         }
         try {

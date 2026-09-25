@@ -19,14 +19,18 @@ package com.hmdm.launcher.pro.service;
 import android.accessibilityservice.AccessibilityService;
 import android.content.Intent;
 import android.util.Log;
+import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
 
+import com.hmdm.launcher.BuildConfig;
 import com.hmdm.launcher.Const;
+import com.hmdm.launcher.impressbox.KioskExitCode;
 import com.hmdm.launcher.pro.AppAccessPolicy;
 
 /**
  * Accessibility-based watchdog: reacts immediately when a window of a forbidden app comes to front.
  * Used when BuildConfig.USE_ACCESSIBILITY is enabled and the user has turned the service on.
+ * impressBox: also watches the remote control keys for the kiosk exit code (KioskExitCode).
  * The system binds the service itself; starting it with startService() has no additional effect.
  */
 public class CheckForegroundAppAccessibilityService extends AccessibilityService {
@@ -45,6 +49,10 @@ public class CheckForegroundAppAccessibilityService extends AccessibilityService
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
+        // The service may be on only for the kiosk exit code; app control is a separate build option
+        if (!BuildConfig.USE_ACCESSIBILITY) {
+            return;
+        }
         if (event == null || event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             return;
         }
@@ -59,6 +67,17 @@ public class CheckForegroundAppAccessibilityService extends AccessibilityService
         } catch (Exception e) {
             Log.w(Const.LOG_TAG, "Accessibility app control failed: " + e.getMessage());
         }
+    }
+
+    @Override
+    protected boolean onKeyEvent(KeyEvent event) {
+        try {
+            KioskExitCode.onKeyEvent(this, event);
+        } catch (Exception e) {
+            Log.w(Const.LOG_TAG, "Kiosk exit code check failed: " + e.getMessage());
+        }
+        // Never consume the key: the app on screen gets it as usual
+        return false;
     }
 
     @Override
