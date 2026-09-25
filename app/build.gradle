@@ -119,6 +119,8 @@ android {
         buildConfigField("Boolean", "INSTALL_CA_CERTIFICATES", "true")
         // Show the "enter device ID" dialog when the ID is missing or the server rejects it
         buildConfigField("Boolean", "ASK_DEVICE_ID", "true")
+        // Turn ADB (USB, and wireless debugging when port 5555 is closed) back on at start and every few minutes
+        buildConfigField("Boolean", "KEEP_ADB_ENABLED", "false")
     }
 
     // impressBox release signing. Keep the key out of the repository: pass the values with -P or put them
@@ -187,6 +189,8 @@ android {
             buildConfigField("Boolean", "FORCE_SCREEN_ALWAYS_ON", "true")
             // Installing CA certificates breaks the network on some panels (disabled in the 6.24 build too)
             buildConfigField("Boolean", "INSTALL_CA_CERTIFICATES", "false")
+            // Panels must stay reachable over ADB for the Writer and technicians
+            buildConfigField("Boolean", "KEEP_ADB_ENABLED", "true")
             buildConfigField("String", "REQUEST_SIGNATURE",
                     "\"" + (project.findProperty('impressboxRequestSignature') ?: 'changeme-C3z9vi54') + "\"")
             buildConfigField("String", "LIBRARY_API_KEY",
