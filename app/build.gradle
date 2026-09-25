@@ -121,6 +121,8 @@ android {
         buildConfigField("Boolean", "ASK_DEVICE_ID", "true")
         // Turn ADB (USB, and wireless debugging when port 5555 is closed) back on at start and every few minutes
         buildConfigField("Boolean", "KEEP_ADB_ENABLED", "false")
+        // Code typed on the remote control to leave kiosk mode (digits; empty = off). Uses the accessibility service
+        buildConfigField("String", "KIOSK_EXIT_CODE", "\"\"")
     }
 
     // impressBox release signing. Keep the key out of the repository: pass the values with -P or put them
@@ -191,6 +193,8 @@ android {
             buildConfigField("Boolean", "INSTALL_CA_CERTIFICATES", "false")
             // Panels must stay reachable over ADB for the Writer and technicians
             buildConfigField("Boolean", "KEEP_ADB_ENABLED", "true")
+            // 9999 on the remote leaves kiosk mode; the launcher app setting kiosk_exit_code overrides it
+            buildConfigField("String", "KIOSK_EXIT_CODE", "\"9999\"")
             buildConfigField("String", "REQUEST_SIGNATURE",
                     "\"" + (project.findProperty('impressboxRequestSignature') ?: 'changeme-C3z9vi54') + "\"")
             buildConfigField("String", "LIBRARY_API_KEY",
