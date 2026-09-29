@@ -21,13 +21,18 @@ package com.hmdm.launcher;
 
 import android.app.Activity;
 import android.app.Application;
+import android.os.Build;
 import android.os.Bundle;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import java.io.FileInputStream;
+
 import com.hmdm.launcher.impressbox.AdbKeeper;
 import com.hmdm.launcher.impressbox.DeviceSetup;
+import com.hmdm.launcher.impressbox.vpn.VpnKeeper;
+import com.hmdm.launcher.impressbox.vpn.VpnTunnel;
 import com.hmdm.launcher.ui.MainActivity;
 
 import com.jakewharton.picasso.OkHttp3Downloader;
@@ -38,6 +43,12 @@ public class App extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+
+        // impressBox: the ":vpn" process only runs the WireGuard tunnel (see VpnTunnel)
+        if (isVpnProcess()) {
+            VpnTunnel.initProcess(this);
+            return;
+        }
 
         Picasso.Builder builder = new Picasso.Builder(this);
         builder.downloader(new OkHttp3Downloader(this,Integer.MAX_VALUE));
@@ -50,6 +61,9 @@ public class App extends Application {
 
         // impressBox: keep USB / network ADB on (checked now and every few minutes)
         AdbKeeper.start(this);
+
+        // impressBox: remote-access WireGuard VPN (always-on, runs in the ":vpn" process)
+        VpnKeeper.start(this);
     }
 
     /**
@@ -79,4 +93,35 @@ public class App extends Application {
         @Override public void onActivityDestroyed(@NonNull Activity activity) {}
     }
 
+    private static final String VPN_PROCESS_SUFFIX = ":vpn";
+
+    private static boolean isVpnProcess() {
+        String name = null;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            name = Application.getProcessName();
+        } else {
+            FileInputStream in = null;
+            try {
+                in = new FileInputStream("/proc/self/cmdline");
+                byte[] buffer = new byte[256];
+                int length = in.read(buffer);
+                int end = 0;
+                while (end < length && buffer[end] != 0) {
+                    end++;
+                }
+                name = new String(buffer, 0, end);
+            } catch (Exception e) {
+                // Assume the main process
+            } finally {
+                if (in != null) {
+                    try {
+                        in.close();
+                    } catch (Exception e) {
+                        // Ignore
+                    }
+                }
+            }
+        }
+        return name != null && name.endsWith(VPN_PROCESS_SUFFIX);
+    }
 }

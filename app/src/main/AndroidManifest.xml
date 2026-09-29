@@ -285,6 +285,25 @@
                 android:value="Push notification service"/>
         </service>
 
+        <!-- impressBox remote-access VPN: the WireGuard VpnService (declared by the wireguard tunnel library)
+             and its control receiver run in their own process, so the tunnel survives launcher crashes -->
+        <service
+            android:name="com.wireguard.android.backend.GoBackend$VpnService"
+            android:process=":vpn"
+            tools:node="merge">
+            <meta-data
+                android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
+                android:value="true" />
+        </service>
+        <receiver
+            android:name=".impressbox.vpn.VpnControlReceiver"
+            android:process=":vpn"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.hmdm.launcher.impressbox.vpn.APPLY" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>
