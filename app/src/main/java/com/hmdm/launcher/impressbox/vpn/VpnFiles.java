@@ -41,6 +41,7 @@ import java.nio.charset.StandardCharsets;
  * - wg.key     the device's WireGuard private key (base64). Created on the device, never leaves it.
  * - wg.conf    the wg-quick config the tunnel must run; missing = tunnel down.
  * - status.json  written by the tunnel: state, error, latest handshake, traffic.
+ * - registration.json  the last answer from the hub's registrar (VpnEnrollment).
  */
 public final class VpnFiles {
 
@@ -50,6 +51,7 @@ public final class VpnFiles {
     private static final String KEY_FILE = "wg.key";
     private static final String CONFIG_FILE = "wg.conf";
     private static final String STATUS_FILE = "status.json";
+    private static final String REGISTRATION_FILE = "registration.json";
 
     private VpnFiles() {}
 
@@ -126,6 +128,22 @@ public final class VpnFiles {
 
     public static void writeStatus(Context context, JSONObject status) {
         write(new File(dir(context), STATUS_FILE), status.toString());
+    }
+
+    public static JSONObject readRegistration(Context context) {
+        String text = read(new File(dir(context), REGISTRATION_FILE));
+        if (text == null) {
+            return null;
+        }
+        try {
+            return new JSONObject(text);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public static void writeRegistration(Context context, JSONObject registration) {
+        write(new File(dir(context), REGISTRATION_FILE), registration.toString());
     }
 
     private static String read(File file) {

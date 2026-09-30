@@ -50,20 +50,23 @@ import java.io.StringReader;
  * player's, goes out as before, and always-on VPN is set WITHOUT lockdown, so a VPN outage never cuts
  * the device off. Isolation (no device-to-device or device-to-our-network traffic) is enforced on the hub.
  *
- * Flow:
- * 1. The launcher generates the WireGuard key pair on the device (the private key never leaves it) and
- *    publishes the public key in a device custom field (default custom3, "wg:&lt;public key&gt;") and in the log.
- * 2. The backend registers that key as a peer on the hub and puts the device's tunnel address and the hub
- *    details into the launcher app settings (server: Applications > launcher settings):
- *    - vpn_enabled       "true" to run the tunnel (anything else: tunnel off, always-on VPN cleared)
- *    - vpn_address       the device's tunnel address, e.g. 10.66.0.12/32
- *    - vpn_endpoint      hub host:port, e.g. vpn.impressbox.eu:51820
- *    - vpn_server_key    hub public key (base64)
- *    - vpn_allowed_ips   routed into the tunnel (default BuildConfig.VPN_ALLOWED_IPS, the staff range)
+ * Enrollment (nothing to set up per device):
+ * 1. The launcher generates the WireGuard key pair on the device; the private key never leaves it.
+ * 2. Builds with VPN_REGISTER_URL + VPN_REGISTER_SECRET (the impressbox flavor) enroll by themselves:
+ *    they send the public key and device ID, HMAC-signed, to the hub's registrar and get back their tunnel
+ *    address and the hub details (VpnEnrollment). The answer is cached and re-confirmed every 12 hours, or
+ *    sooner when the hub stops answering, so a device the hub has forgotten enrolls again.
+ * 3. The launcher writes wg.conf, sets itself as the always-on VPN and tells the ":vpn" process to apply.
+ * 4. The tunnel address is shown in the MDM in a device custom field (default custom3).
+ *
+ * Launcher app settings (server: Applications > launcher settings), all optional:
+ *    - vpn_enabled       "false" turns the VPN off (always-on VPN cleared); "true" forces it on.
+ *                        Empty: on when the build can enroll by itself.
+ *    - vpn_address, vpn_endpoint, vpn_server_key: set all three to configure the tunnel by hand instead
+ *    - vpn_allowed_ips   routed into the tunnel (default: what the hub says, else BuildConfig.VPN_ALLOWED_IPS)
  *    - vpn_keepalive     persistent keepalive seconds (default 25, keeps the NAT mapping open)
  *    - vpn_mtu           tunnel MTU (default 1280)
- *    - vpn_custom_field  1, 2 or 3: custom field for the public key (default 3); "off" to not publish it
- * 3. The launcher writes wg.conf, sets itself as the always-on VPN and tells the ":vpn" process to apply.
+ *    - vpn_custom_field  1, 2 or 3: custom field that shows the tunnel address (default 3); "off" to not use one
  *
  * Checked at start, after every configuration update and every few minutes; state changes (up/down,
  * handshake lost/regained, errors) go to the server log.
@@ -75,6 +78,8 @@ public class VpnKeeper {
     private static final long STATUS_DELAY_MS = 20 * 1000;
     // With a 25 s keepalive WireGuard re-handshakes every ~2 minutes; older than this = hub unreachable
     private static final long HANDSHAKE_STALE_MS = 5 * 60 * 1000;
+    // No handshake for this long: ask the hub again whether it still knows this device
+    private static final long HANDSHAKE_REENROLL_MS = 30 * 60 * 1000;
 
     public static final String SETTING_ENABLED = "vpn_enabled";
     public static final String SETTING_ADDRESS = "vpn_address";
@@ -84,8 +89,6 @@ public class VpnKeeper {
     public static final String SETTING_KEEPALIVE = "vpn_keepalive";
     public static final String SETTING_MTU = "vpn_mtu";
     public static final String SETTING_CUSTOM_FIELD = "vpn_custom_field";
-
-    private static final String CUSTOM_PREFIX = "wg:";
 
     private static Handler handler;
     private static Context appContext;
@@ -139,20 +142,46 @@ public class VpnKeeper {
                 return;
             }
             String publicKey = keyPair.getPublicKey().toBase64();
-            publishPublicKey(context, settings, publicKey);
+            if (!publicKey.equals(loggedPublicKey)) {
+                RemoteLogger.log(context, Const.LOG_INFO, "VPN: device WireGuard public key " + publicKey);
+                loggedPublicKey = publicKey;
+            }
 
             String configText = null;
             String problem = null;
-            if ("true".equalsIgnoreCase(setting(settings, context, SETTING_ENABLED))) {
+            String enabled = setting(settings, context, SETTING_ENABLED);
+            boolean autoEnroll = VpnEnrollment.isAvailable();
+            // On by default where the build can enroll by itself; the setting still switches it off (or on)
+            boolean on = TextUtils.isEmpty(enabled) ? autoEnroll : "true".equalsIgnoreCase(enabled);
+            if (on) {
                 String address = setting(settings, context, SETTING_ADDRESS);
                 String endpoint = setting(settings, context, SETTING_ENDPOINT);
                 String serverKey = setting(settings, context, SETTING_SERVER_KEY);
+                String allowedIps = setting(settings, context, SETTING_ALLOWED_IPS);
                 if (TextUtils.isEmpty(address) || TextUtils.isEmpty(endpoint) || TextUtils.isEmpty(serverKey)) {
-                    problem = "enabled, but vpn_address / vpn_endpoint / vpn_server_key are not all set"
-                            + " (register public key " + publicKey + " on the hub first)";
-                } else {
+                    // Not set by hand: enroll with the hub (cached; re-confirmed now and then)
+                    if (!autoEnroll) {
+                        problem = "enabled, but vpn_address / vpn_endpoint / vpn_server_key are not all set"
+                                + " and this build cannot enroll by itself (public key " + publicKey + ")";
+                    } else {
+                        VpnEnrollment.Result enrollment = VpnEnrollment.get(context, settings.getDeviceId(),
+                                publicKey, handshakeLost(context));
+                        if (enrollment.problem != null) {
+                            problem = enrollment.problem;
+                        }
+                        if (enrollment.address != null) {
+                            address = enrollment.address;
+                            endpoint = enrollment.endpoint;
+                            serverKey = enrollment.serverKey;
+                            if (TextUtils.isEmpty(allowedIps)) {
+                                allowedIps = enrollment.allowedIps;
+                            }
+                        }
+                    }
+                }
+                if (!TextUtils.isEmpty(address) && !TextUtils.isEmpty(endpoint) && !TextUtils.isEmpty(serverKey)) {
                     configText = buildConfig(keyPair, address, endpoint, serverKey,
-                            valueOr(setting(settings, context, SETTING_ALLOWED_IPS), BuildConfig.VPN_ALLOWED_IPS),
+                            valueOr(allowedIps, BuildConfig.VPN_ALLOWED_IPS),
                             valueOr(setting(settings, context, SETTING_KEEPALIVE), "25"),
                             valueOr(setting(settings, context, SETTING_MTU), "1280"));
                     try {
@@ -162,6 +191,9 @@ public class VpnKeeper {
                         configText = null;
                     }
                 }
+                publishAddress(settings, context, configText != null ? address : null);
+            } else {
+                publishAddress(settings, context, null);
             }
 
             boolean changed = VpnFiles.writeConfig(context, configText);
@@ -267,30 +299,27 @@ public class VpnKeeper {
         }
     }
 
-    // Puts "wg:<public key>" into the chosen custom field; it is sent with the next device info
-    private static void publishPublicKey(Context context, SettingsHelper settings, String publicKey) {
-        if (!publicKey.equals(loggedPublicKey)) {
-            RemoteLogger.log(context, Const.LOG_INFO, "VPN: device WireGuard public key " + publicKey);
-            loggedPublicKey = publicKey;
-        }
+    // The device's tunnel address (e.g. "10.66.1.5") in the chosen custom field, so the MDM shows where to
+    // "adb connect"; empty when the VPN is off. Sent to the server with the next device info (every 15 min).
+    private static void publishAddress(SettingsHelper settings, Context context, String address) {
         String field = valueOr(setting(settings, context, SETTING_CUSTOM_FIELD), "3").trim();
-        String value = CUSTOM_PREFIX + publicKey;
+        String value = address == null ? "" : address.trim().replaceFirst("/\\d+$", "");
         ServerConfig config = settings.getConfig();
         switch (field) {
             case "1":
-                if (!value.equals(settings.getUserCustom1())) {
+                if (!value.equals(valueOr(settings.getUserCustom1(), ""))) {
                     settings.setUserCustom1(value);
                     config.setCustom1(value);
                 }
                 break;
             case "2":
-                if (!value.equals(settings.getUserCustom2())) {
+                if (!value.equals(valueOr(settings.getUserCustom2(), ""))) {
                     settings.setUserCustom2(value);
                     config.setCustom2(value);
                 }
                 break;
             case "3":
-                if (!value.equals(settings.getUserCustom3())) {
+                if (!value.equals(valueOr(settings.getUserCustom3(), ""))) {
                     settings.setUserCustom3(value);
                     config.setCustom3(value);
                 }
@@ -299,6 +328,17 @@ public class VpnKeeper {
                 // "off"
                 break;
         }
+    }
+
+    // The tunnel is up but the hub has not answered for a while: the peer may be gone on the hub side
+    private static boolean handshakeLost(Context context) {
+        JSONObject status = VpnFiles.readStatus(context);
+        if (status == null || !"UP".equals(status.optString("state"))) {
+            return false;
+        }
+        // never answered, or not for a long time (VpnEnrollment limits the attempts to one per 30 minutes)
+        long handshake = status.optLong("handshake", 0);
+        return handshake == 0 || System.currentTimeMillis() - handshake > HANDSHAKE_REENROLL_MS;
     }
 
     // Logs the state when it differs from the last one reported
