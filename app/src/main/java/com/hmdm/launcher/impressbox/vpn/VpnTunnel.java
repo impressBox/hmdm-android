@@ -29,8 +29,9 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.StringReader;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The WireGuard tunnel. Runs ONLY in the ":vpn" process, together with GoBackend's VpnService, so a
@@ -46,7 +47,10 @@ import java.util.concurrent.Executors;
  */
 public final class VpnTunnel {
 
-    private static final ExecutorService executor = Executors.newSingleThreadExecutor();
+    // The first handshake completes a moment after the tunnel comes up: write the status again then
+    private static final long STATUS_REFRESH_S = 10;
+
+    private static final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
     private static GoBackend backend;
     private static final Tunnel tunnel = new Tunnel() {
         @Override
@@ -60,6 +64,7 @@ public final class VpnTunnel {
         }
     };
     private static String appliedConfig;
+    private static String lastError;
 
     private VpnTunnel() {}
 
@@ -98,8 +103,7 @@ public final class VpnTunnel {
         return backend;
     }
 
-    private static void applyNow(Context context) {
-        JSONObject status = new JSONObject();
+    private static void applyNow(final Context context) {
         String error = null;
         String text = VpnFiles.readConfig(context);
         GoBackend goBackend = getBackend(context);
@@ -122,13 +126,25 @@ public final class VpnTunnel {
             appliedConfig = null;
             Log.w(Const.LOG_TAG, "VPN: apply failed: " + error);
         }
+        lastError = error;
+        writeStatus(context);
+        executor.schedule(new Runnable() {
+            @Override
+            public void run() {
+                writeStatus(context);
+            }
+        }, STATUS_REFRESH_S, TimeUnit.SECONDS);
+    }
 
+    private static void writeStatus(Context context) {
         try {
+            GoBackend goBackend = getBackend(context);
+            JSONObject status = new JSONObject();
             Tunnel.State state = goBackend.getState(tunnel);
             status.put("state", state.name());
-            status.put("configured", text != null);
-            if (error != null) {
-                status.put("error", error);
+            status.put("configured", VpnFiles.readConfig(context) != null);
+            if (lastError != null) {
+                status.put("error", lastError);
             }
             if (state == Tunnel.State.UP) {
                 Statistics stats = goBackend.getStatistics(tunnel);

@@ -168,12 +168,24 @@ public class VpnKeeper {
             String alwaysOn = updateAlwaysOn(context, configText != null);
 
             if (configText != null || changed) {
+                final long sentAt = System.currentTimeMillis();
                 VpnControlReceiver.send(context);
                 final String finalProblem = problem;
                 final String finalAlwaysOn = alwaysOn;
+                final boolean wanted = configText != null;
                 handler.postDelayed(new Runnable() {
                     @Override
                     public void run() {
+                        if (wanted && !isTunnelUp(context, sentAt) && restartAlwaysOn(context)) {
+                            // Give the restarted tunnel time to come up, then report
+                            handler.postDelayed(new Runnable() {
+                                @Override
+                                public void run() {
+                                    report(context, finalProblem, finalAlwaysOn);
+                                }
+                            }, STATUS_DELAY_MS);
+                            return;
+                        }
                         report(context, finalProblem, finalAlwaysOn);
                     }
                 }, STATUS_DELAY_MS);
@@ -224,6 +236,34 @@ public class VpnKeeper {
             return null;
         } catch (Exception e) {
             return "always-on VPN failed: " + e.getMessage();
+        }
+    }
+
+    // True when the tunnel process applied the config after `since` and the tunnel is up
+    private static boolean isTunnelUp(Context context, long since) {
+        JSONObject status = VpnFiles.readStatus(context);
+        return status != null && status.optLong("time", 0) >= since && "UP".equals(status.optString("state"));
+    }
+
+    /**
+     * The tunnel process did not answer (killed, crashed) or could not bring the tunnel up. Android does not
+     * always restart an always-on VPN whose process died, and an app in the background may not start the
+     * VPN service itself; clearing and setting always-on again makes the system start it right away.
+     */
+    private static boolean restartAlwaysOn(Context context) {
+        if (!Utils.isDeviceOwner(context)) {
+            return false;
+        }
+        try {
+            DevicePolicyManager dpm = (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
+            ComponentName admin = LegacyUtils.getAdminComponentName(context);
+            dpm.setAlwaysOnVpnPackage(admin, null, false);
+            dpm.setAlwaysOnVpnPackage(admin, context.getPackageName(), false);
+            RemoteLogger.log(context, Const.LOG_WARN, "VPN: tunnel was not running, always-on VPN restarted");
+            return true;
+        } catch (Exception e) {
+            Log.w(Const.LOG_TAG, "VPN: cannot restart always-on VPN: " + e.getMessage());
+            return false;
         }
     }
 
