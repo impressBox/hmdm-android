@@ -127,6 +127,9 @@ android {
         buildConfigField("Boolean", "VPN_SUPPORTED", "false")
         // Routed into the tunnel unless the vpn_allowed_ips setting says otherwise: the staff / jump host range only
         buildConfigField("String", "VPN_ALLOWED_IPS", "\"10.67.0.0/24\"")
+        // Self-enrollment with the hub's registrar (impressbox.vpn.VpnEnrollment); empty = no self-enrollment
+        buildConfigField("String", "VPN_REGISTER_URL", "\"\"")
+        buildConfigField("String", "VPN_REGISTER_SECRET", "\"\"")
     }
 
     // impressBox release signing. Keep the key out of the repository: pass the values with -P or put them
@@ -184,7 +187,7 @@ android {
 
         // impressBox signage build: ./gradlew assembleImpressboxRelease
         // Secrets are read from Gradle properties (-P or ~/.gradle/gradle.properties), never committed:
-        //   impressboxRequestSignature, impressboxLibraryApiKey
+        //   impressboxRequestSignature, impressboxLibraryApiKey, impressboxVpnSecret
         impressbox {
             // Higher than the 6.24 "master" build (16240) so it installs over it
             versionCode 16390
@@ -203,6 +206,12 @@ android {
             buildConfigField("String", "KIOSK_EXIT_CODE", "\"9999\"")
             // Remote-access WireGuard VPN; off until the vpn_* launcher settings are set
             buildConfigField("Boolean", "VPN_SUPPORTED", "true")
+            // Devices enroll by themselves; the secret is k8s-services vpn/registrar-secret.sh, passed like the
+            // other impressbox secrets (-PimpressboxVpnSecret or ~/.gradle/gradle.properties). Without it the
+            // build can still use hand-set vpn_* settings, it just cannot enroll by itself.
+            buildConfigField("String", "VPN_REGISTER_URL", "\"https://wg.impressbox.eu/register\"")
+            buildConfigField("String", "VPN_REGISTER_SECRET",
+                    "\"" + (project.findProperty('impressboxVpnSecret') ?: '') + "\"")
             buildConfigField("String", "REQUEST_SIGNATURE",
                     "\"" + (project.findProperty('impressboxRequestSignature') ?: 'changeme-C3z9vi54') + "\"")
             buildConfigField("String", "LIBRARY_API_KEY",
