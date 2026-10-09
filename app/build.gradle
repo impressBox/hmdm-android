@@ -123,6 +123,13 @@ android {
         buildConfigField("Boolean", "KEEP_ADB_ENABLED", "false")
         // Code typed on the remote control to leave kiosk mode (digits; empty = off). Uses the accessibility service
         buildConfigField("String", "KIOSK_EXIT_CODE", "\"\"")
+        // Remote-access WireGuard VPN (impressbox.vpn.VpnKeeper); runs only when the launcher settings enable it
+        buildConfigField("Boolean", "VPN_SUPPORTED", "false")
+        // Routed into the tunnel unless the vpn_allowed_ips setting says otherwise: the staff / jump host range only
+        buildConfigField("String", "VPN_ALLOWED_IPS", "\"10.67.0.0/24\"")
+        // Self-enrollment with the hub's registrar (impressbox.vpn.VpnEnrollment); empty = no self-enrollment
+        buildConfigField("String", "VPN_REGISTER_URL", "\"\"")
+        buildConfigField("String", "VPN_REGISTER_SECRET", "\"\"")
     }
 
     // impressBox release signing. Keep the key out of the repository: pass the values with -P or put them
@@ -152,8 +159,10 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        // Java 17: the WireGuard tunnel library contains Java records, and D8 only desugars them
+        // (global synthetics) when the app itself targets a Java version that knows records
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 
     packagingOptions {
@@ -178,7 +187,7 @@ android {
 
         // impressBox signage build: ./gradlew assembleImpressboxRelease
         // Secrets are read from Gradle properties (-P or ~/.gradle/gradle.properties), never committed:
-        //   impressboxRequestSignature, impressboxLibraryApiKey
+        //   impressboxRequestSignature, impressboxLibraryApiKey, impressboxVpnSecret
         impressbox {
             // Higher than the 6.24 "master" build (16240) so it installs over it
             versionCode 16390
@@ -195,6 +204,14 @@ android {
             buildConfigField("Boolean", "KEEP_ADB_ENABLED", "true")
             // 9999 on the remote leaves kiosk mode; the launcher app setting kiosk_exit_code overrides it
             buildConfigField("String", "KIOSK_EXIT_CODE", "\"9999\"")
+            // Remote-access WireGuard VPN; off until the vpn_* launcher settings are set
+            buildConfigField("Boolean", "VPN_SUPPORTED", "true")
+            // Devices enroll by themselves; the secret is k8s-services vpn/registrar-secret.sh, passed like the
+            // other impressbox secrets (-PimpressboxVpnSecret or ~/.gradle/gradle.properties). Without it the
+            // build can still use hand-set vpn_* settings, it just cannot enroll by itself.
+            buildConfigField("String", "VPN_REGISTER_URL", "\"https://wg.impressbox.eu/register\"")
+            buildConfigField("String", "VPN_REGISTER_SECRET",
+                    "\"" + (project.findProperty('impressboxVpnSecret') ?: '') + "\"")
             buildConfigField("String", "REQUEST_SIGNATURE",
                     "\"" + (project.findProperty('impressboxRequestSignature') ?: 'changeme-C3z9vi54') + "\"")
             buildConfigField("String", "LIBRARY_API_KEY",
@@ -235,6 +252,9 @@ dependencies {
 
     // Worker
     implementation 'androidx.work:work-runtime:2.9.1'
+
+    // impressBox remote-access VPN: WireGuard userspace (Go) backend with its VpnService
+    implementation 'com.wireguard.android:tunnel:1.0.20230706'
 
     implementation('com.journeyapps:zxing-android-embedded:4.1.0') { transitive = false }
     implementation 'com.google.zxing:core:3.3.0'
