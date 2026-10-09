@@ -121,6 +121,8 @@ android {
         buildConfigField("Boolean", "ASK_DEVICE_ID", "true")
         // Turn ADB (USB, and wireless debugging when port 5555 is closed) back on at start and every few minutes
         buildConfigField("Boolean", "KEEP_ADB_ENABLED", "false")
+        // Find the vendor's Wake-on-LAN switch(es) and keep them on (impressbox.WakeOnLanKeeper)
+        buildConfigField("Boolean", "KEEP_WAKE_ON_LAN", "false")
         // Code typed on the remote control to leave kiosk mode (digits; empty = off). Uses the accessibility service
         buildConfigField("String", "KIOSK_EXIT_CODE", "\"\"")
         // Remote-access WireGuard VPN (impressbox.vpn.VpnKeeper); runs only when the launcher settings enable it
@@ -202,6 +204,8 @@ android {
             buildConfigField("Boolean", "INSTALL_CA_CERTIFICATES", "false")
             // Panels must stay reachable over ADB for the Writer and technicians
             buildConfigField("Boolean", "KEEP_ADB_ENABLED", "true")
+            // Panels must wake up from a Wake-on-LAN magic packet: the launcher finds and turns on the vendor switch
+            buildConfigField("Boolean", "KEEP_WAKE_ON_LAN", "true")
             // 9999 on the remote leaves kiosk mode; the launcher app setting kiosk_exit_code overrides it
             buildConfigField("String", "KIOSK_EXIT_CODE", "\"9999\"")
             // Remote-access WireGuard VPN; off until the vpn_* launcher settings are set

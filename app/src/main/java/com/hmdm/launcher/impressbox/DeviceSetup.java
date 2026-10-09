@@ -229,6 +229,8 @@ public class DeviceSetup {
         applyRotationLock(context);
         enableAccessibilityService(context);
         publishSerialToPlayer(context);
+        // Re-checked after each configuration update, so a changed wol_* launcher setting applies at once
+        WakeOnLanKeeper.requestCheck(context);
     }
 
     /**
