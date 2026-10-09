@@ -30,6 +30,7 @@ import androidx.annotation.Nullable;
 import java.io.FileInputStream;
 
 import com.hmdm.launcher.impressbox.AdbKeeper;
+import com.hmdm.launcher.impressbox.WakeOnLanKeeper;
 import com.hmdm.launcher.impressbox.DeviceSetup;
 import com.hmdm.launcher.impressbox.vpn.VpnKeeper;
 import com.hmdm.launcher.impressbox.vpn.VpnTunnel;
@@ -61,6 +62,9 @@ public class App extends Application {
 
         // impressBox: keep USB / network ADB on (checked now and every few minutes)
         AdbKeeper.start(this);
+
+        // impressBox: find the vendor's Wake-on-LAN switch and keep it on (checked now and every 30 minutes)
+        WakeOnLanKeeper.start(this);
 
         // impressBox: remote-access WireGuard VPN (always-on, runs in the ":vpn" process)
         VpnKeeper.start(this);
