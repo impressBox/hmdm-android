@@ -42,6 +42,7 @@ import android.widget.ImageView;
 import com.hmdm.launcher.Const;
 import com.hmdm.launcher.R;
 import com.hmdm.launcher.helper.SettingsHelper;
+import com.hmdm.launcher.impressbox.KioskSuspension;
 import com.hmdm.launcher.json.ServerConfig;
 import com.hmdm.launcher.pro.service.CheckForegroundAppAccessibilityService;
 import com.hmdm.launcher.ui.custom.BlockingBar;
@@ -68,7 +69,8 @@ public class ProUtils {
 
     public static boolean kioskModeRequired(Context context) {
         ServerConfig config = SettingsHelper.getInstance(context).getConfig();
-        return config != null && config.isKioskMode();
+        // Left on purpose (remote control code / server command): stays off whatever the configuration says
+        return config != null && config.isKioskMode() && !KioskSuspension.isActive();
     }
 
     public static void initCrashlytics(Context context) {

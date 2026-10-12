@@ -39,8 +39,9 @@ import com.hmdm.launcher.util.RemoteLogger;
  * service, which sees every key without consuming it. The digit keys of IR / Bluetooth remotes arrive as
  * KEYCODE_0..9 (some as NUMPAD_0..9) on practically every Android device; both are accepted.
  *
- * Typing the code does what the server's "exit kiosk" command does: kiosk mode is left until the next
- * configuration update or restart. Every exit is written to the server log.
+ * Typing the code does what the server's "exit kiosk" command does: kiosk mode is left and stays off (see
+ * KioskSuspension) until the code is typed again, the kiosk_exit_minutes timeout (default 30) or a restart.
+ * Every exit and return is written to the server log.
  *
  * Launcher app settings (server: Applications > launcher settings):
  * - kiosk_exit_code: the code, digits only; "off" or an empty value disables it (default BuildConfig.KIOSK_EXIT_CODE)
@@ -48,6 +49,9 @@ import com.hmdm.launcher.util.RemoteLogger;
  *   remote control sends
  */
 public class KioskExitCode {
+
+    /** Local broadcast handled by MainActivity: end the kiosk suspension (KioskSuspension) and go back to kiosk mode */
+    public static final String ACTION_RESUME_KIOSK = "com.hmdm.launcher.impressbox.RESUME_KIOSK";
 
     private static final String APP_SETTING_CODE = "kiosk_exit_code";
     private static final String APP_SETTING_LOG_KEYS = "log_key_codes";
@@ -107,6 +111,12 @@ public class KioskExitCode {
     }
 
     private static void exitKiosk(Context context) {
+        if (KioskSuspension.isActive()) {
+            // Typed again while kiosk mode is off: back to kiosk mode
+            RemoteLogger.log(context, Const.LOG_INFO, "Kiosk mode back on by the code typed on the remote control");
+            LocalBroadcastManager.getInstance(context).sendBroadcast(new Intent(ACTION_RESUME_KIOSK));
+            return;
+        }
         ServerConfig config = SettingsHelper.getInstance(context).getConfig();
         boolean inKiosk = KioskController.isRunning(context) || (config != null && config.isKioskMode());
         if (!inKiosk) {
