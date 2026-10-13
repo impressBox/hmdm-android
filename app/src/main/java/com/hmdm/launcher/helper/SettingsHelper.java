@@ -350,6 +350,8 @@ public class SettingsHelper {
         updateAllowedClassesSet(config);
         this.oldConfig = this.config;
         this.config = config;
+        // impressBox: the VPN settings may have changed
+        com.hmdm.launcher.impressbox.vpn.VpnKeeper.requestCheck();
     }
 
     public ServerConfig getConfig() {

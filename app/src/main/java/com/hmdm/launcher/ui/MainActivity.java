@@ -96,6 +96,8 @@ import com.hmdm.launcher.helper.ConfigUpdater;
 import com.hmdm.launcher.helper.CryptoHelper;
 import com.hmdm.launcher.helper.Initializer;
 import com.hmdm.launcher.helper.SettingsHelper;
+import com.hmdm.launcher.impressbox.KioskExitCode;
+import com.hmdm.launcher.impressbox.KioskSuspension;
 import com.hmdm.launcher.json.Application;
 import com.hmdm.launcher.json.DeviceInfo;
 import com.hmdm.launcher.json.RemoteFile;
@@ -287,12 +289,11 @@ public class MainActivity
                     break;
 
                 case Const.ACTION_EXIT_KIOSK:
-                    ServerConfig config = settingsHelper.getConfig();
-                    if (config != null) {
-                        config.setKioskMode(false);
-                        RemoteLogger.log(MainActivity.this, Const.LOG_INFO, "Exit kiosk by admin command");
-                        showContent(config);
-                    }
+                    exitKiosk();
+                    break;
+
+                case KioskExitCode.ACTION_RESUME_KIOSK:
+                    resumeKiosk("the code typed on the remote control");
                     break;
 
                 case Const.ACTION_ADMIN_PANEL:
@@ -546,6 +547,7 @@ public class MainActivity
         intentFilter.addAction(Const.ACTION_EXIT);
         intentFilter.addAction(Const.ACTION_POLICY_VIOLATION);
         intentFilter.addAction(Const.ACTION_EXIT_KIOSK);
+        intentFilter.addAction(KioskExitCode.ACTION_RESUME_KIOSK);
         intentFilter.addAction(Const.ACTION_ADMIN_PANEL);
         LocalBroadcastManager.getInstance(this).registerReceiver(receiver, intentFilter);
     }
@@ -2014,6 +2016,64 @@ public class MainActivity
     }
 
     // Run default launcher (Headwind MDM) as if the user clicked Home button
+    // Leaves kiosk mode (server "exit kiosk" command, or the code on the remote control) and shows the desktop.
+    // Kiosk mode stays off until the code is typed again, the kiosk_exit_minutes timeout, or a restart.
+    // The configuration whose kiosk flag exitKiosk() switched off, to switch it back on when the suspension ends
+    private ServerConfig kioskSuspendedConfig = null;
+
+    private final Runnable kioskSuspensionTimeout = () -> {
+        if (!KioskSuspension.isActive()) {
+            resumeKiosk("timeout");
+        }
+    };
+
+    private void exitKiosk() {
+        ServerConfig config = settingsHelper.getConfig();
+        if (config == null) {
+            return;
+        }
+        boolean wasRunning = ProUtils.isKioskModeRunning(this);
+        if (config.isKioskMode()) {
+            kioskSuspendedConfig = config;
+        }
+        long ms = KioskSuspension.start(this);
+        config.setKioskMode(false);
+        RemoteLogger.log(this, Const.LOG_INFO, "Exit kiosk by admin command (lock task "
+                + (wasRunning ? "running" : "not running") + "; kiosk stays off "
+                + (ms == Long.MAX_VALUE ? "until restart" : "for " + (ms / 60000) + " min") + ")");
+        handler.removeCallbacks(kioskSuspensionTimeout);
+        if (ms != Long.MAX_VALUE) {
+            handler.postDelayed(kioskSuspensionTimeout, ms + 1000);
+        }
+
+        // Stop the lock task here rather than relying on showContent(), and bring the launcher in front of the
+        // main app, which is still on top after the lock task ends
+        if (wasRunning) {
+            ProUtils.unlockKiosk(this);
+        }
+        Intent launcherIntent = new Intent(this, MainActivity.class);
+        launcherIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+        startActivity(launcherIntent);
+        showContent(config);
+    }
+
+    private void resumeKiosk(String reason) {
+        handler.removeCallbacks(kioskSuspensionTimeout);
+        KioskSuspension.end();
+        ServerConfig config = settingsHelper.getConfig();
+        // Only the configuration we switched off is switched back on; a newer one from the server is used as is
+        if (config != null && config == kioskSuspendedConfig) {
+            config.setKioskMode(true);
+        }
+        kioskSuspendedConfig = null;
+        if (config == null) {
+            return;
+        }
+        RemoteLogger.log(this, Const.LOG_INFO, "Kiosk suspension ended by " + reason
+                + (config.isKioskMode() ? "; kiosk mode resumed" : "; kiosk mode is off in the configuration"));
+        showContent(config);
+    }
+
     private void openDefaultLauncher() {
         Intent intent = new Intent(Intent.ACTION_MAIN);
         intent.addCategory(Intent.CATEGORY_HOME);
