@@ -1,0 +1,11 @@
+# Weekly upkeep for the hmdm-android runner pool (ci/runner/maintenance.sh): rebuild the runner
+# image on the current actions-runner release. Triggered by hmdm-runner-maintenance.timer.
+[Unit]
+Description=hmdm-android runner pool maintenance
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/hmdm-runner/maintenance.sh
