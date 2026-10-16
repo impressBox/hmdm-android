@@ -1,0 +1,6 @@
+# actionlint: the self-hosted runner labels our workflows target (docs/ci-runners.md).
+# Without this list actionlint reports them as unknown.
+self-hosted-runner:
+  labels:
+    - hmdm-ci
+    - hmdm-build

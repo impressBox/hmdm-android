@@ -1,0 +1,23 @@
+# hmdm-runner@<class>-<n>.service — one ephemeral GitHub Actions runner slot for hmdm-android
+# (ci/runner). Installed by ci/runner/install.sh. Each start registers a just-in-time runner, runs one
+# job in a fresh container and exits; Restart=always brings the slot straight back for the next job.
+[Unit]
+Description=hmdm-android GitHub Actions runner slot %i
+Documentation=https://github.com/impressBox/hmdm-android/blob/master/docs/ci-runners.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+# Never give up on a slot; hmdm-runner.sh backs off by itself when registration fails.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/opt/hmdm-runner/hmdm-runner.sh %i
+Restart=always
+RestartSec=10
+# SIGTERM goes to the script only; it stops the container (STOP_TIMEOUT grace) and deregisters.
+KillMode=mixed
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

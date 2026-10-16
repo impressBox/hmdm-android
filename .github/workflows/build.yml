@@ -1,0 +1,166 @@
+name: Build APK
+
+# Builds the impressbox launcher APK (assembleImpressboxRelease) on our own runner pool on the build
+# server (ci/runner/, docs/ci-runners.md). GitHub-hosted runners are blocked by the organisation's
+# billing, so no job here may use them.
+#
+#   push to any branch, workflow_dispatch  signed APK, kept as a workflow artifact for 30 days
+#   tag v*                                 the same, also attached to a GitHub Release for the tag
+#   pull request from a fork               unsigned build without secrets (a compile check)
+#
+# Pull requests from branches of this repository are not built twice: their pushes already are.
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.event_name }}-${{ github.ref }}
+  # A newer push to the same branch makes the older build pointless; tags always finish.
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
+
+jobs:
+  signed:
+    if: github.event_name != 'pull_request'
+    runs-on: hmdm-build
+    timeout-minutes: 45
+    permissions:
+      contents: write   # only used on a tag, to attach the APK to its release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Runner wiring
+        shell: bash
+        run: bash ci/runner/check-wiring.sh
+
+      # The signing key and the build secrets come from repository secrets (docs/ci-runners.md,
+      # "Signing"). Without them the APK could not update a panel in place (other key) or would not
+      # talk to the server (placeholder request signature), so the job fails instead of producing it.
+      - name: Signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.IMPRESSBOX_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.IMPRESSBOX_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.IMPRESSBOX_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.IMPRESSBOX_KEY_PASSWORD }}
+          REQUEST_SIGNATURE: ${{ secrets.IMPRESSBOX_REQUEST_SIGNATURE }}
+          LIBRARY_API_KEY: ${{ secrets.IMPRESSBOX_LIBRARY_API_KEY }}
+          VPN_SECRET: ${{ secrets.IMPRESSBOX_VPN_SECRET }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD REQUEST_SIGNATURE LIBRARY_API_KEY; do
+            [ -n "${!name:-}" ] || missing+=("IMPRESSBOX_$name")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing repository secrets: ${missing[*]} (docs/ci-runners.md, Signing)"
+            exit 1
+          fi
+          [ -n "${VPN_SECRET:-}" ] || echo "::warning::IMPRESSBOX_VPN_SECRET is not set: this APK cannot enroll in the VPN by itself"
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/impressbox.keystore"
+          keytool -list -keystore "$RUNNER_TEMP/impressbox.keystore" -storepass:env STORE_PASSWORD -alias "$KEY_ALIAS" >/dev/null \
+            || { echo "::error::The keystore does not open with IMPRESSBOX_STORE_PASSWORD, or has no alias IMPRESSBOX_KEY_ALIAS"; exit 1; }
+
+      - name: Build
+        shell: bash
+        env:
+          # Gradle reads ORG_GRADLE_PROJECT_<name> as the project property <name> (app/build.gradle),
+          # so nothing secret appears on a command line.
+          ORG_GRADLE_PROJECT_impressboxStoreFile: ${{ runner.temp }}/impressbox.keystore
+          ORG_GRADLE_PROJECT_impressboxStorePassword: ${{ secrets.IMPRESSBOX_STORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_impressboxKeyAlias: ${{ secrets.IMPRESSBOX_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_impressboxKeyPassword: ${{ secrets.IMPRESSBOX_KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_impressboxRequestSignature: ${{ secrets.IMPRESSBOX_REQUEST_SIGNATURE }}
+          ORG_GRADLE_PROJECT_impressboxLibraryApiKey: ${{ secrets.IMPRESSBOX_LIBRARY_API_KEY }}
+          ORG_GRADLE_PROJECT_impressboxVpnSecret: ${{ secrets.IMPRESSBOX_VPN_SECRET }}
+        run: bash ./gradlew --no-daemon --stacktrace assembleImpressboxRelease
+
+      # Panels only accept an update signed with the key they were provisioned with. The repository
+      # variable IMPRESSBOX_CERT_SHA256 holds that certificate's SHA-256; a different one fails here.
+      - name: Check the signature
+        id: apk
+        shell: bash
+        env:
+          EXPECTED_CERT: ${{ vars.IMPRESSBOX_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          apk=app/build/outputs/apk/impressbox/release/app-impressbox-release.apk
+          [ -f "$apk" ] || { echo "::error::No signed APK in app/build/outputs/apk/impressbox/release/"; ls -la app/build/outputs/apk/impressbox/release/ || true; exit 1; }
+          apksigner verify --print-certs "$apk" > "$RUNNER_TEMP/certs.txt"
+          cert=$(sed -n 's/.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/certs.txt" | head -n1)
+          want=$(printf '%s' "${EXPECTED_CERT:-}" | tr -d ': ' | tr 'A-F' 'a-f')
+          if [ -z "$want" ]; then
+            echo "::warning::Repository variable IMPRESSBOX_CERT_SHA256 is not set, so the signing certificate ($cert) is not checked"
+          elif [ "$cert" != "$want" ]; then
+            echo "::error::Signed with certificate $cert, expected $want (IMPRESSBOX_CERT_SHA256). Panels would refuse this APK as an update."
+            exit 1
+          fi
+          badging=$(aapt2 dump badging "$apk" | head -n1)
+          version=$(sed -n "s/.*versionName='\([^']*\)'.*/\1/p" <<<"$badging")
+          code=$(sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" <<<"$badging")
+          ref=$(printf '%s' "$GITHUB_REF_NAME" | tr -c 'A-Za-z0-9._-' '-')
+          name="hmdm-${version}-impressbox-${ref}-${GITHUB_SHA::7}"
+          mkdir -p out
+          cp "$apk" "out/$name.apk"
+          sha256sum "out/$name.apk" | tee "out/$name.apk.sha256"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          {
+            echo "### $name.apk"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| version | $version ($code) |"
+            echo "| commit | \`${GITHUB_SHA::7}\` on \`$GITHUB_REF_NAME\` |"
+            echo "| certificate SHA-256 | \`$cert\` |"
+            echo "| APK SHA-256 | \`$(cut -d' ' -f1 "out/$name.apk.sha256")\` |"
+            echo "| runner | \`$RUNNER_NAME\` |"
+            echo
+            echo "Install over the current launcher: \`adb install -r $name.apk\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.name }}
+          path: out/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/${{ steps.apk.outputs.name }}.apk
+            out/${{ steps.apk.outputs.name }}.apk.sha256
+          fail_on_unmatched_files: true
+
+      # Belt and braces: the container is thrown away after the job anyway.
+      - name: Remove the signing key
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/impressbox.keystore"
+
+  # Pull requests from forks get no secrets: build unsigned, as a compile check, on the ci slots,
+  # which never hold anything a signed build reads.
+  fork-pr:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: hmdm-ci
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Runner wiring
+        shell: bash
+        run: bash ci/runner/check-wiring.sh
+      - name: Build (unsigned)
+        shell: bash
+        run: bash ./gradlew --no-daemon --stacktrace assembleImpressboxRelease assembleOpensourceDebug

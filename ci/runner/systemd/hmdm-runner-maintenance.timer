@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekly hmdm-android runner pool maintenance
+
+[Timer]
+# After the player (03:30), writer (04:30), manage and gateway (~05:00) pool maintenance,
+# so the image rebuilds do not compete for the host.
+OnCalendar=Sun *-*-* 06:00:00
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
