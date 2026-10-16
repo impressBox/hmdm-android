@@ -67,7 +67,7 @@ install -d -m 0700 "$CONF_DIR"
 if [ ! -f "$CONF" ]; then
   install -m 0600 "$SRC/runner.env.example" "$CONF"
   echo "Created $CONF from the template."
-  echo "Put the GitHub token in ${CONF_DIR}/github-pat (docs/ci-runners.md, step 2), then run install.sh again."
+  echo "Put the GitHub token in ${CONF_DIR}/github-pat (docs/ci-runners.md, One-time setup, step 1), then run install.sh again."
   exit 0
 fi
 # shellcheck source=runner.env.example
@@ -75,7 +75,7 @@ fi
 
 if [ -z "${GITHUB_APP_ID:-}" ] && { [ -z "${GITHUB_PAT_FILE:-}" ] || [ ! -s "$GITHUB_PAT_FILE" ]; }; then
   echo "install.sh: no GitHub credential yet. Put the token in ${GITHUB_PAT_FILE:-$CONF_DIR/github-pat}" >&2
-  echo "  (chmod 600), or configure the GitHub App in $CONF. See docs/ci-runners.md, step 2." >&2
+  echo "  (chmod 600), or configure the GitHub App in $CONF. See docs/ci-runners.md, One-time setup, step 1." >&2
   exit 1
 fi
 
