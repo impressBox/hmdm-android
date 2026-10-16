@@ -91,6 +91,18 @@ The keystore is written to the job's temporary directory, handed to Gradle throu
 `ORG_GRADLE_PROJECT_*` environment variables (never a command line), deleted at the end of the
 job, and gone with the container anyway.
 
+### This repository is public
+
+- **Anyone can download the APKs** (workflow artifacts and releases of a public repository are
+  public). The APK carries what the build compiles into it: the request signature, the library
+  API key and the VPN enrollment secret. That is no change from today, as the same launcher is
+  shipped inside the Writer's public installers, but keep it in mind, or make the repository
+  private.
+- **Pull requests from forks run on our build server** (the `hmdm-ci` slots: no secrets, a fresh
+  container, no Docker socket or host mounts). Keep Settings → Actions → General → *Fork pull
+  request workflows* on **Require approval for all external contributors**, so nothing runs before
+  someone has read the change.
+
 ## One-time setup (on the build server, as root)
 
 1. **GitHub token.** GitHub → your Settings → Developer settings → Personal access tokens →
