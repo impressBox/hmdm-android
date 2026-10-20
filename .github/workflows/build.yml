@@ -2,7 +2,7 @@ name: Build APK
 
 # Builds the impressbox launcher APK (assembleImpressboxRelease).
 #
-# Where: GitHub-hosted ubuntu-latest for now (free for this public repository). Our own runner pool
+# Where: GitHub-hosted ubuntu-24.04 for now (free for this public repository). Our own runner pool
 # on the build server (ci/runner/, docs/ci-runners.md) takes over when the repository variables
 # HMDM_BUILD_RUNNER=hmdm-build and HMDM_CI_RUNNER=hmdm-ci are set, with no change to this file.
 #
@@ -30,7 +30,7 @@ concurrency:
 jobs:
   signed:
     if: github.event_name != 'pull_request'
-    runs-on: ${{ vars.HMDM_BUILD_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.HMDM_BUILD_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 45
     permissions:
       contents: write   # only used on a tag, to attach the APK to its release
@@ -171,7 +171,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the APK
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.apk.outputs.name }}
           path: out/
@@ -197,7 +197,7 @@ jobs:
   # ci slots, which never hold anything a signed build reads).
   fork-pr:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
-    runs-on: ${{ vars.HMDM_CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.HMDM_CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 45
     steps:
       - name: Checkout

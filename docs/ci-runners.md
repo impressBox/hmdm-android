@@ -18,7 +18,7 @@ The APK is named `hmdm-<versionName>-impressbox-<branch or tag>-<commit>.apk`.
 
 ## Where it runs
 
-**For now on GitHub-hosted `ubuntu-latest`** (free for this public repository; JDK 17 via
+**For now on GitHub-hosted `ubuntu-24.04`** (pinned: `ubuntu-latest` is moving to Ubuntu 26) (free for this public repository; JDK 17 via
 `actions/setup-java`, the image's Android SDK, Gradle cache via `gradle/actions/setup-gradle`).
 
 To move the builds to **this repository's own runner pool on the build server (10.0.0.200)**, set
