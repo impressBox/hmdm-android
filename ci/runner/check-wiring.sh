@@ -5,7 +5,8 @@
 #   bash ci/runner/check-wiring.sh
 # It fails when
 #   - a job asks for a runner label no pool slot carries (a typo does not fail a job: it just
-#     waits in the queue forever), or for a GitHub-hosted image (blocked by billing);
+#     waits in the queue forever). A runs-on expression (repository variable with a GitHub-hosted
+#     fallback) is not checked, except for hmdm-* labels written into it;
 #   - the slot script gives a container more of the host than its cache volume (a Docker socket,
 #     a host directory, --privileged, the host network).
 set -euo pipefail
@@ -26,6 +27,12 @@ done
 for wf in "$ROOT"/.github/workflows/*.yml; do
   while IFS= read -r line; do
     want="$(sed -E 's/^[[:space:]]*runs-on:[[:space:]]*//; s/[][,]/ /g; s/"//g' <<<"$line")"
+    # An expression picks the runner at run time (repository variable, GitHub-hosted fallback):
+    # only a pool label written into it must exist.
+    # shellcheck disable=SC2016  # a literal "${{", not an expansion
+    if [[ "$want" == *'${{'* ]]; then
+      want="$(grep -oE "'hmdm-[a-z-]+'" <<<"$want" | tr -d "'" || true)"
+    fi
     for label in $want; do
       case " $labels " in
         *" $label "*) ;;

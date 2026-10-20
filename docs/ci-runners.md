@@ -5,7 +5,7 @@ it with the impressbox release key, and keeps the APK:
 
 | Trigger                           | Result                                                                  |
 | --------------------------------- | ----------------------------------------------------------------------- |
-| push to any branch                | signed APK as a **workflow artifact** (30 days)                         |
+| push to any branch                | signed APK as a **workflow artifact** (30 days); unsigned `…-UNSIGNED.apk` while the secrets are missing |
 | Actions → Build APK → Run workflow | the same, for the branch you pick                                       |
 | tag `v*`                          | the same, and attached to the **GitHub Release** of the tag             |
 | pull request from a fork          | unsigned build without secrets (a compile check only)                   |
@@ -18,8 +18,13 @@ The APK is named `hmdm-<versionName>-impressbox-<branch or tag>-<commit>.apk`.
 
 ## Where it runs
 
-GitHub-hosted runners are blocked by the organisation's billing (since 2026-09-25), so the build
-runs on **this repository's own runner pool on the build server (10.0.0.200)**, defined in
+**For now on GitHub-hosted `ubuntu-latest`** (free for this public repository; JDK 17 via
+`actions/setup-java`, the image's Android SDK, Gradle cache via `gradle/actions/setup-gradle`).
+
+To move the builds to **this repository's own runner pool on the build server (10.0.0.200)**, set
+up the pool (below) and set the repository variables `HMDM_BUILD_RUNNER=hmdm-build` and
+`HMDM_CI_RUNNER=hmdm-ci`; the workflow picks them up without changes. Unset them to go back. The
+pool is defined in
 [`ci/runner/`](../ci/runner). It sits next to the impress-player, manage, gateway and impress-write
 pools on that host and shares nothing with them: its own image, config, systemd units, containers,
 cache volumes (all named `hmdm-runner`) and its own GitHub token, scoped to this repository only.
@@ -77,15 +82,12 @@ The key **must** be the one the shipped launcher is signed with. Android only in
 signed with the same key, and the only other way in is to uninstall the launcher, which drops
 device owner and means provisioning the panel again on site.
 
-**Variable** `IMPRESSBOX_CERT_SHA256`: the SHA-256 of that signing certificate (colons optional),
-e.g. from the shipped APK:
+The build checks the APK's certificate against the impressbox release certificate
+(`CN=com.impressbox`, SHA-256 `7b8a6724…1fb13e56`, written in the workflow) and fails on any other.
+The repository variable `IMPRESSBOX_CERT_SHA256` overrides it, should the key ever change.
 
-```bash
-apksigner verify --print-certs hmdm-6.39.apk | grep 'SHA-256'
-```
-
-The build fails if the APK is signed with any other certificate. While the variable is not set,
-the build only warns.
+Without the secrets the build still runs, unsigned: the APK is named `…-UNSIGNED.apk`, a panel will
+not install it, and it is never attached to a release.
 
 The keystore is written to the job's temporary directory, handed to Gradle through
 `ORG_GRADLE_PROJECT_*` environment variables (never a command line), deleted at the end of the
