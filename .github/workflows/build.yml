@@ -1,10 +1,13 @@
 name: Build APK
 
-# Builds the impressbox launcher APK (assembleImpressboxRelease) on our own runner pool on the build
-# server (ci/runner/, docs/ci-runners.md). GitHub-hosted runners are blocked by the organisation's
-# billing, so no job here may use them.
+# Builds the impressbox launcher APK (assembleImpressboxRelease).
+#
+# Where: GitHub-hosted ubuntu-24.04 for now (free for this public repository). Our own runner pool
+# on the build server (ci/runner/, docs/ci-runners.md) takes over when the repository variables
+# HMDM_BUILD_RUNNER=hmdm-build and HMDM_CI_RUNNER=hmdm-ci are set, with no change to this file.
 #
 #   push to any branch, workflow_dispatch  signed APK, kept as a workflow artifact for 30 days
+#                                          (unsigned, named ...-UNSIGNED, while the secrets are not set)
 #   tag v*                                 the same, also attached to a GitHub Release for the tag
 #   pull request from a fork               unsigned build without secrets (a compile check)
 #
@@ -27,22 +30,43 @@ concurrency:
 jobs:
   signed:
     if: github.event_name != 'pull_request'
-    runs-on: hmdm-build
+    runs-on: ${{ vars.HMDM_BUILD_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 45
     permissions:
       contents: write   # only used on a tag, to attach the APK to its release
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Runner wiring
         shell: bash
         run: bash ci/runner/check-wiring.sh
 
+      # JDK 17 and Gradle's cache. On our pool the image already has JDK 17; this pins the same one.
+      - name: JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      # apksigner and aapt2 are not on PATH on GitHub-hosted images; use the newest build-tools.
+      - name: Android build-tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          bt=$(find "${ANDROID_HOME:?ANDROID_HOME is not set}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)
+          echo "build-tools: $bt"
+          echo "$bt" >> "$GITHUB_PATH"
+
       # The signing key and the build secrets come from repository secrets (docs/ci-runners.md,
-      # "Signing"). Without them the APK could not update a panel in place (other key) or would not
-      # talk to the server (placeholder request signature), so the job fails instead of producing it.
+      # "Signing"). With all of them the APK is signed with the impressbox release key; without them
+      # it is built unsigned, so the code is still compiled and checked, but the APK is named
+      # ...-UNSIGNED and cannot be installed on a panel.
       - name: Signing key
+        id: signing
         shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.IMPRESSBOX_KEYSTORE_BASE64 }}
@@ -59,16 +83,19 @@ jobs:
             [ -n "${!name:-}" ] || missing+=("IMPRESSBOX_$name")
           done
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::error::Missing repository secrets: ${missing[*]} (docs/ci-runners.md, Signing)"
-            exit 1
+            echo "::warning::Building UNSIGNED: missing repository secrets ${missing[*]} (docs/ci-runners.md, Signing)"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           [ -n "${VPN_SECRET:-}" ] || echo "::warning::IMPRESSBOX_VPN_SECRET is not set: this APK cannot enroll in the VPN by itself"
           umask 077
           printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/impressbox.keystore"
           keytool -list -keystore "$RUNNER_TEMP/impressbox.keystore" -storepass:env STORE_PASSWORD -alias "$KEY_ALIAS" >/dev/null \
             || { echo "::error::The keystore does not open with IMPRESSBOX_STORE_PASSWORD, or has no alias IMPRESSBOX_KEY_ALIAS"; exit 1; }
+          echo "signed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Build
+      - name: Build (signed)
+        if: steps.signing.outputs.signed == 'true'
         shell: bash
         env:
           # Gradle reads ORG_GRADLE_PROJECT_<name> as the project property <name> (app/build.gradle),
@@ -82,31 +109,45 @@ jobs:
           ORG_GRADLE_PROJECT_impressboxVpnSecret: ${{ secrets.IMPRESSBOX_VPN_SECRET }}
         run: bash ./gradlew --no-daemon --stacktrace assembleImpressboxRelease
 
-      # Panels only accept an update signed with the key they were provisioned with. The repository
-      # variable IMPRESSBOX_CERT_SHA256 holds that certificate's SHA-256; a different one fails here.
+      - name: Build (unsigned)
+        if: steps.signing.outputs.signed != 'true'
+        shell: bash
+        run: bash ./gradlew --no-daemon --stacktrace assembleImpressboxRelease
+
+      # Panels only accept an update signed with the key they were provisioned with: the impressbox
+      # release certificate below (CN=com.impressbox, the one on the shipped launchers). The repository
+      # variable IMPRESSBOX_CERT_SHA256 overrides it. Any other certificate fails the build.
       - name: Check the signature
         id: apk
         shell: bash
         env:
-          EXPECTED_CERT: ${{ vars.IMPRESSBOX_CERT_SHA256 }}
+          SIGNED: ${{ steps.signing.outputs.signed }}
+          EXPECTED_CERT: ${{ vars.IMPRESSBOX_CERT_SHA256 || '7b8a67248176a41bb90f2a4afc39a1c6b9b96847fa224bc9d2c06fb01fb13e56' }}
         run: |
           set -euo pipefail
-          apk=app/build/outputs/apk/impressbox/release/app-impressbox-release.apk
-          [ -f "$apk" ] || { echo "::error::No signed APK in app/build/outputs/apk/impressbox/release/"; ls -la app/build/outputs/apk/impressbox/release/ || true; exit 1; }
-          apksigner verify --print-certs "$apk" > "$RUNNER_TEMP/certs.txt"
-          cert=$(sed -n 's/.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/certs.txt" | head -n1)
-          want=$(printf '%s' "${EXPECTED_CERT:-}" | tr -d ': ' | tr 'A-F' 'a-f')
-          if [ -z "$want" ]; then
-            echo "::warning::Repository variable IMPRESSBOX_CERT_SHA256 is not set, so the signing certificate ($cert) is not checked"
-          elif [ "$cert" != "$want" ]; then
-            echo "::error::Signed with certificate $cert, expected $want (IMPRESSBOX_CERT_SHA256). Panels would refuse this APK as an update."
-            exit 1
+          dir=app/build/outputs/apk/impressbox/release
+          if [ "$SIGNED" = true ]; then
+            apk=$dir/app-impressbox-release.apk
+            [ -f "$apk" ] || { echo "::error::No signed APK in $dir"; ls -la "$dir" || true; exit 1; }
+            apksigner verify --print-certs "$apk" > "$RUNNER_TEMP/certs.txt"
+            cert=$(sed -n 's/.*certificate SHA-256 digest: //p' "$RUNNER_TEMP/certs.txt" | head -n1)
+            want=$(printf '%s' "$EXPECTED_CERT" | tr -d ': ' | tr 'A-F' 'a-f')
+            if [ "$cert" != "$want" ]; then
+              echo "::error::Signed with certificate $cert, expected $want. Panels would refuse this APK as an update."
+              exit 1
+            fi
+            suffix=""
+          else
+            apk=$dir/app-impressbox-release-unsigned.apk
+            [ -f "$apk" ] || { echo "::error::No APK in $dir"; ls -la "$dir" || true; exit 1; }
+            cert="none (unsigned: the signing secrets are not set)"
+            suffix="-UNSIGNED"
           fi
           badging=$(aapt2 dump badging "$apk" | head -n1)
           version=$(sed -n "s/.*versionName='\([^']*\)'.*/\1/p" <<<"$badging")
           code=$(sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" <<<"$badging")
           ref=$(printf '%s' "$GITHUB_REF_NAME" | tr -c 'A-Za-z0-9._-' '-')
-          name="hmdm-${version}-impressbox-${ref}-${GITHUB_SHA::7}"
+          name="hmdm-${version}-impressbox-${ref}-${GITHUB_SHA::7}${suffix}"
           mkdir -p out
           cp "$apk" "out/$name.apk"
           sha256sum "out/$name.apk" | tee "out/$name.apk.sha256"
@@ -122,11 +163,15 @@ jobs:
             echo "| APK SHA-256 | \`$(cut -d' ' -f1 "out/$name.apk.sha256")\` |"
             echo "| runner | \`$RUNNER_NAME\` |"
             echo
-            echo "Install over the current launcher: \`adb install -r $name.apk\`"
+            if [ "$SIGNED" = true ]; then
+              echo "Install over the current launcher: \`adb install -r $name.apk\`"
+            else
+              echo "**Unsigned**: a panel will not install this. Set the IMPRESSBOX_* secrets (docs/ci-runners.md, Signing)."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.apk.outputs.name }}
           path: out/
@@ -134,7 +179,7 @@ jobs:
           if-no-files-found: error
 
       - name: Attach to the release
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' && steps.signing.outputs.signed == 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -148,19 +193,39 @@ jobs:
         shell: bash
         run: rm -f "$RUNNER_TEMP/impressbox.keystore"
 
-  # Pull requests from forks get no secrets: build unsigned, as a compile check, on the ci slots,
-  # which never hold anything a signed build reads.
+  # Pull requests from forks get no secrets: build unsigned, as a compile check (on our pool: on the
+  # ci slots, which never hold anything a signed build reads).
   fork-pr:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
-    runs-on: hmdm-ci
+    runs-on: ${{ vars.HMDM_CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Runner wiring
         shell: bash
         run: bash ci/runner/check-wiring.sh
+
+      # JDK 17 and Gradle's cache. On our pool the image already has JDK 17; this pins the same one.
+      - name: JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      # apksigner and aapt2 are not on PATH on GitHub-hosted images; use the newest build-tools.
+      - name: Android build-tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          bt=$(find "${ANDROID_HOME:?ANDROID_HOME is not set}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)
+          echo "build-tools: $bt"
+          echo "$bt" >> "$GITHUB_PATH"
+
       - name: Build (unsigned)
         shell: bash
         run: bash ./gradlew --no-daemon --stacktrace assembleImpressboxRelease assembleOpensourceDebug
