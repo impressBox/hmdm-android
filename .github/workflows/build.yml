@@ -36,7 +36,7 @@ jobs:
       contents: write   # only used on a tag, to attach the APK to its release
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Runner wiring
         shell: bash
@@ -44,13 +44,13 @@ jobs:
 
       # JDK 17 and Gradle's cache. On our pool the image already has JDK 17; this pins the same one.
       - name: JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
 
       # apksigner and aapt2 are not on PATH on GitHub-hosted images; use the newest build-tools.
       - name: Android build-tools
@@ -171,7 +171,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ steps.apk.outputs.name }}
           path: out/
@@ -201,7 +201,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Runner wiring
         shell: bash
@@ -209,13 +209,13 @@ jobs:
 
       # JDK 17 and Gradle's cache. On our pool the image already has JDK 17; this pins the same one.
       - name: JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
 
       # apksigner and aapt2 are not on PATH on GitHub-hosted images; use the newest build-tools.
       - name: Android build-tools
