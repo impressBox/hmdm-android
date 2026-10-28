@@ -132,6 +132,11 @@ android {
         // Self-enrollment with the hub's registrar (impressbox.vpn.VpnEnrollment); empty = no self-enrollment
         buildConfigField("String", "VPN_REGISTER_URL", "\"\"")
         buildConfigField("String", "VPN_REGISTER_SECRET", "\"\"")
+        // Local API for the player (impressbox.localapi, docs/launcher-local-api.json): SHA-256 digests of the signing
+        // certificates whose apps may run its commands, comma separated; empty = nobody
+        buildConfigField("String", "LOCAL_API_CALLER_CERTS", "\"\"")
+        // More allowed certificates, in debug builds only (buildTypes.debug)
+        buildConfigField("String", "LOCAL_API_EXTRA_CALLER_CERTS", "\"\"")
     }
 
     // impressBox release signing. Keep the key out of the repository: pass the values with -P or put them
@@ -157,6 +162,10 @@ android {
         debug {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Emulator tests: a test app signed with this computer's debug key may call the local API,
+            // -PlocalApiDebugCallerCerts=<SHA-256 of its certificate>. Release builds never read this property.
+            buildConfigField("String", "LOCAL_API_EXTRA_CALLER_CERTS",
+                    "\"" + (project.findProperty('localApiDebugCallerCerts') ?: '') + "\"")
         }
     }
 
@@ -191,8 +200,9 @@ android {
         // Secrets are read from Gradle properties (-P or ~/.gradle/gradle.properties), never committed:
         //   impressboxRequestSignature, impressboxLibraryApiKey, impressboxVpnSecret
         impressbox {
-            // Higher than the 6.24 "master" build (16240) so it installs over it
-            versionCode 16390
+            // Higher than the 6.24 "master" build (16240) so it installs over it; 6.39.1 adds the local API
+            versionCode 16391
+            versionName "6.39.1"
             // Device ID = the hardware serial number (as Android returns it); never ask on the device.
             // The launcher passes it to the player (managed config "serial_number"), which reports the same ID
             buildConfigField("String", "DEVICE_ID_CHOICE", "\"impressbox_serial\"")
@@ -220,6 +230,9 @@ android {
                     "\"" + (project.findProperty('impressboxRequestSignature') ?: 'changeme-C3z9vi54') + "\"")
             buildConfigField("String", "LIBRARY_API_KEY",
                     "\"" + (project.findProperty('impressboxLibraryApiKey') ?: 'changeme-8gzk321W') + "\"")
+            // The player (com.impressplayer, CI-signed CN=Domas Velykis) may use the local API
+            buildConfigField("String", "LOCAL_API_CALLER_CERTS",
+                    "\"A7A7EAE8911E7522D00CFD377D5DED6F2BBEEF629DF6A37BB3C97AEEA96BEA53\"")
             if (project.hasProperty('impressboxStoreFile')) {
                 signingConfig signingConfigs.impressbox
             }

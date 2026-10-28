@@ -252,6 +252,14 @@
             </intent-filter>
         </service>
 
+        <!-- impressBox local API for the player (docs/launcher-local-api.json). Exported, but every command checks
+             the caller's signing certificate against BuildConfig.LOCAL_API_CALLER_CERTS -->
+        <service android:name=".impressbox.localapi.LocalApiService" android:exported="true">
+            <intent-filter>
+                <action android:name="com.impressbox.launcher.LOCAL_API" />
+            </intent-filter>
+        </service>
+
         <service android:name=".pro.service.CheckForegroundAppAccessibilityService"
                  android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
                  android:label="@string/white_app_name"

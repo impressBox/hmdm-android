@@ -53,6 +53,7 @@ import androidx.annotation.RequiresApi;
 
 import com.hmdm.launcher.BuildConfig;
 import com.hmdm.launcher.Const;
+import com.hmdm.launcher.impressbox.localapi.LocalApiZone;
 import com.hmdm.launcher.json.Action;
 import com.hmdm.launcher.json.ServerConfig;
 import com.hmdm.launcher.ui.MainActivity;
@@ -787,9 +788,18 @@ public class Utils {
             ComponentName adminComponentName = LegacyUtils.getAdminComponentName(context);
 
             if (timeZone.equals("auto")) {
+                // impressBox: a zone the player set through the local API stays; turning automatic time zone back on
+                // at every configuration sync would undo it
+                String localApiZone = LocalApiZone.keptFor(context, timeZone);
+                if (localApiZone != null) {
+                    Log.i(Const.LOG_TAG, "Time zone " + localApiZone + " was set through the local API, automatic time zone stays off");
+                    return true;
+                }
                 // Note: in Android 11, there is a special method for setting auto time zone
                 devicePolicyManager.setGlobalSetting(adminComponentName, Settings.Global.AUTO_TIME_ZONE, "1");
             } else {
+                // impressBox: a fixed zone in the configuration owns the zone; the local API then refuses to change it
+                LocalApiZone.clear(context);
                 devicePolicyManager.setGlobalSetting(adminComponentName, Settings.Global.AUTO_TIME_ZONE, "0");
                 return devicePolicyManager.setTimeZone(adminComponentName, timeZone);
             }
