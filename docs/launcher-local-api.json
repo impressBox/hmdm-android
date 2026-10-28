@@ -1,0 +1,97 @@
+{
+  "name": "impressBox launcher local API",
+  "apiVersion": 1,
+  "about": "The player asks the device-owner launcher to change settings only a device owner can change. The same file is hmdm-android docs/launcher-local-api.json and impress-player app/android/helpers/launcherApi/launcher-local-api.json; the contract test in each repository checks its code against it.",
+  "service": {
+    "package": "com.hmdm.launcher",
+    "action": "com.impressbox.launcher.LOCAL_API",
+    "interface": "com.impressbox.launcher.localapi.ILocalApi",
+    "methods": [
+      "int getApiVersion()",
+      "List<String> getCapabilities()",
+      "Bundle run(String command, in Bundle args)"
+    ]
+  },
+  "callers": "run() answers only apps whose signing certificate SHA-256 is on the launcher's allowlist (release builds: the player, CN=Domas Velykis, A7A7EAE8911E7522D00CFD377D5DED6F2BBEEF629DF6A37BB3C97AEEA96BEA53). Others get CALLER_NOT_ALLOWED.",
+  "result": {
+    "code": "int, one of codes",
+    "message": "String, for the log"
+  },
+  "codes": {
+    "OK": 0,
+    "CALLER_NOT_ALLOWED": 1,
+    "UNKNOWN_COMMAND": 2,
+    "BAD_ARGUMENT": 3,
+    "NOT_DEVICE_OWNER": 4,
+    "UNSUPPORTED": 5,
+    "MANAGED_BY_CONFIG": 6,
+    "REFUSED": 7,
+    "FAILED": 8
+  },
+  "commands": {
+    "getStatus": {
+      "minSdk": 26,
+      "deviceOwner": false,
+      "args": {},
+      "results": {
+        "zone": "String: the device time zone now",
+        "autoTimeZone": "boolean",
+        "autoTime": "boolean",
+        "deviceOwner": "boolean",
+        "configTimeZone": "String, absent when the HMDM configuration has none",
+        "localApiZone": "String, absent when no zone was set through this API",
+        "systemUpdatePolicy": "String: automatic | windowed <start>-<end> | postpone | none",
+        "launcherVersion": "String"
+      }
+    },
+    "setTimeZone": {
+      "minSdk": 28,
+      "deviceOwner": true,
+      "args": {
+        "zone": "String: an IANA time zone id, or auto to give the zone back to automatic detection"
+      },
+      "results": {
+        "zone": "String: the device time zone now",
+        "previousZone": "String"
+      },
+      "refuses": "MANAGED_BY_CONFIG while the HMDM configuration sets a fixed timeZone (anything but auto or empty). While a zone set here is kept, the configuration's auto no longer turns automatic time zone back on."
+    },
+    "setAutoTime": {
+      "minSdk": 26,
+      "deviceOwner": true,
+      "args": {
+        "enabled": "boolean: automatic (network) time on or off"
+      },
+      "results": {}
+    },
+    "setTime": {
+      "minSdk": 28,
+      "deviceOwner": true,
+      "args": {
+        "epochMillis": "long: UTC milliseconds since 1970"
+      },
+      "results": {},
+      "refuses": "REFUSED while automatic time is on: call setAutoTime with enabled false first"
+    },
+    "reboot": {
+      "minSdk": 26,
+      "deviceOwner": true,
+      "args": {
+        "reason": "String, optional, written to the log"
+      },
+      "results": {},
+      "note": "Answers OK first; the device reboots about 2 seconds later."
+    },
+    "setSystemUpdatePolicy": {
+      "minSdk": 26,
+      "deviceOwner": true,
+      "args": {
+        "type": "String: automatic | windowed | postpone | none",
+        "windowStart": "int, windowed only: minutes after local midnight, 0-1439",
+        "windowEnd": "int, windowed only: minutes after local midnight, 0-1439"
+      },
+      "results": {},
+      "refuses": "MANAGED_BY_CONFIG while the HMDM configuration sets a system update type other than the default"
+    }
+  }
+}
