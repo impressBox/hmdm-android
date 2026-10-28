@@ -30,6 +30,17 @@ public class LocalApiRulesTest {
     }
 
     @Test
+    public void configurationAutoKeepsTheZoneSetThroughTheApi() {
+        assertEquals("Europe/Warsaw", LocalApiRules.zoneToKeep("auto", "Europe/Warsaw"));
+        assertEquals("Europe/Warsaw", LocalApiRules.zoneToKeep(" auto ", "Europe/Warsaw"));
+        // No zone set through the API: auto turns automatic time zone on as it always did
+        assertNull(LocalApiRules.zoneToKeep("auto", null));
+        // A fixed configuration zone is applied (and clears the API zone); no configuration zone is never applied
+        assertNull(LocalApiRules.zoneToKeep("Europe/Vilnius", "Europe/Warsaw"));
+        assertNull(LocalApiRules.zoneToKeep(null, "Europe/Warsaw"));
+    }
+
+    @Test
     public void refusesUnknownCommandsAndMissingRights() {
         assertEquals(LocalApi.UNKNOWN_COMMAND, LocalApiRules.refusal(null, 34, true));
         assertEquals(LocalApi.UNKNOWN_COMMAND, LocalApiRules.refusal("wipeData", 34, true));

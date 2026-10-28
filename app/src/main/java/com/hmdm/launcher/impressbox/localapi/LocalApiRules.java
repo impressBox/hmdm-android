@@ -98,6 +98,17 @@ final class LocalApiRules {
         return !zone.isEmpty() && !LocalApi.ZONE_AUTO.equalsIgnoreCase(zone);
     }
 
+    /**
+     * The zone the configuration's timeZone must leave alone: a zone set through the local API while the configuration
+     * says "auto" (turning automatic time zone back on at every sync would undo it). Null when there is none.
+     */
+    static String zoneToKeep(String configZone, String localApiZone) {
+        if (localApiZone == null || configZone == null || !LocalApi.ZONE_AUTO.equals(configZone.trim())) {
+            return null;
+        }
+        return localApiZone;
+    }
+
     static boolean isKnownZone(String zone, Collection<String> availableIds) {
         return zone != null && availableIds.contains(zone);
     }

@@ -790,7 +790,7 @@ public class Utils {
             if (timeZone.equals("auto")) {
                 // impressBox: a zone the player set through the local API stays; turning automatic time zone back on
                 // at every configuration sync would undo it
-                String localApiZone = LocalApiZone.get(context);
+                String localApiZone = LocalApiZone.keptFor(context, timeZone);
                 if (localApiZone != null) {
                     Log.i(Const.LOG_TAG, "Time zone " + localApiZone + " was set through the local API, automatic time zone stays off");
                     return true;

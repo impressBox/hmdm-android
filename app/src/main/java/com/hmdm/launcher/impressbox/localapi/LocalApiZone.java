@@ -40,6 +40,11 @@ public final class LocalApiZone {
         prefs(context).edit().putString(PREFERENCE, zone).commit();
     }
 
+    /** The zone Utils.setTimeZone must keep for the configuration's timeZone (LocalApiRules.zoneToKeep), else null. */
+    public static String keptFor(Context context, String configZone) {
+        return LocalApiRules.zoneToKeep(configZone, get(context));
+    }
+
     public static void clear(Context context) {
         if (get(context) != null) {
             prefs(context).edit().remove(PREFERENCE).commit();
